@@ -1,0 +1,17 @@
+{
+  "type": "record",
+  "name": "RiskDecisionAvro",
+  "namespace": "com.realrisk.avro",
+  "doc": "Decision emitted by the async risk engine to decision-audit.",
+  "fields": [
+    {"name": "decisionId", "type": "string"},
+    {"name": "eventId", "type": "string"},
+    {"name": "requestId", "type": "string"},
+    {"name": "userId", "type": "string"},
+    {"name": "decision", "type": "string"},
+    {"name": "riskScore", "type": "int"},
+    {"name": "reasons", "type": {"type": "array", "items": "string"}},
+    {"name": "createdAt", "type": {"type": "long", "logicalType": "timestamp-millis"}},
+    {"name": "source", "type": "string", "default": "risk-worker"}
+  ]
+}

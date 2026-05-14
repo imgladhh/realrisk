@@ -1,0 +1,20 @@
+{
+  "type": "record",
+  "name": "RiskEventAvro",
+  "namespace": "com.realrisk.avro",
+  "doc": "Raw event published by the API Gateway to raw-events and copied to raw-audit.",
+  "fields": [
+    {"name": "eventId", "type": "string"},
+    {"name": "requestId", "type": "string"},
+    {"name": "userId", "type": "string"},
+    {"name": "eventType", "type": "string"},
+    {"name": "timestamp", "type": {"type": "long", "logicalType": "timestamp-millis"}},
+    {"name": "amountCents", "type": "long"},
+    {"name": "currency", "type": "string"},
+    {"name": "ipAddress", "type": ["null", "string"], "default": null},
+    {"name": "deviceFp", "type": ["null", "string"], "default": null},
+    {"name": "merchantId", "type": ["null", "string"], "default": null},
+    {"name": "counterparty", "type": ["null", "string"], "default": null},
+    {"name": "source", "type": "string", "default": "api-gateway"}
+  ]
+}

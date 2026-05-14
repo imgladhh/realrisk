@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Rename-Item \"E:\\\\realRisk\\\\ARCHITECTURE.md.md\" \"ARCHITECTURE.md\")",
+      "Bash(Get-Content \"E:\\\\realRisk\\\\ARCHITECTURE.md\")",
+      "Bash(Select-String \"OBJECT|audit-log|user_id % |double|minio:latest|ARCHITECTURE.md.md\")",
+      "Bash(Select-Object LineNumber, Line)",
+      "Bash(grep -c \"request_id\\\\|Redis Materializer\\\\|decision-audit\\\\|Two-Tier\\\\|Strimzi\\\\|reconcile\\\\|circuit.breaker\" /mnt/e/realRisk/ARCHITECTURE.md)",
+      "PowerShell(Get-ChildItem -Path \"E:\\\\realRisk\" -Recurse -Directory | Select-Object -First 30 | ForEach-Object { $_.FullName })",
+      "Bash(git add *)"
+    ]
+  }
+}
