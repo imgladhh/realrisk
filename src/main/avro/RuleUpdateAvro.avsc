@@ -1,0 +1,39 @@
+{
+  "type": "record",
+  "name": "RuleUpdateAvro",
+  "namespace": "com.realrisk.avro",
+  "doc": "Rule configuration update broadcast via rule-updates topic.",
+  "fields": [
+    {
+      "name": "ruleId",
+      "type": "string",
+      "doc": "Stable unique identifier for this rule instance, e.g. 'rule-large-amount-v1'."
+    },
+    {
+      "name": "ruleType",
+      "type": "string",
+      "doc": "Rule category: large_amount | withdrawal_without_device | merchant_multi_user_burst | global"
+    },
+    {
+      "name": "enabled",
+      "type": "boolean",
+      "doc": "false = deactivate this rule; engine falls back to config defaults for its type."
+    },
+    {
+      "name": "parameters",
+      "type": {
+        "type": "map",
+        "values": "string"
+      },
+      "default": {},
+      "doc": "Key-value parameters for this rule. See per-type keys below."
+    },
+    {
+      "name": "updatedAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    }
+  ]
+}

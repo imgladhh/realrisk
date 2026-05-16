@@ -1,0 +1,18 @@
+{
+  "type": "record",
+  "name": "HighRiskEventAvro",
+  "namespace": "com.realrisk.avro",
+  "doc": "High-risk projection emitted by the Flink job for downstream consumers.",
+  "fields": [
+    {"name": "highRiskEventId", "type": "string"},
+    {"name": "decisionId", "type": "string"},
+    {"name": "eventId", "type": "string"},
+    {"name": "requestId", "type": "string"},
+    {"name": "userId", "type": "string"},
+    {"name": "merchantId", "type": ["null", "string"], "default": null},
+    {"name": "riskScore", "type": "int"},
+    {"name": "reasons", "type": {"type": "array", "items": "string"}},
+    {"name": "createdAt", "type": {"type": "long", "logicalType": "timestamp-millis"}},
+    {"name": "source", "type": "string", "default": "flink-risk-engine"}
+  ]
+}

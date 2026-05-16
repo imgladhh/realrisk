@@ -4,6 +4,7 @@ import com.realrisk.config.RiskProperties;
 import com.realrisk.model.RateLimitResult;
 import java.time.Clock;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -17,6 +18,7 @@ public class RateLimitService {
   private final Clock clock;
   private final DefaultRedisScript<List> riskCheckScript;
 
+  @Autowired
   public RateLimitService(StringRedisTemplate redis, RiskProperties properties) {
     this(redis, properties, Clock.systemUTC());
   }

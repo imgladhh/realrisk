@@ -1,7 +1,10 @@
 .idea/
 .vscode/
 target/
+**/target/
 .tools/
 *.iml
 .env
 .DS_Store
+.claude/
+flink.log

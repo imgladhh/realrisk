@@ -1,0 +1,17 @@
+{
+  "type": "record",
+  "name": "AlertEventAvro",
+  "namespace": "com.realrisk.avro",
+  "doc": "Alert notification trigger emitted by the Flink job for downstream alerting services.",
+  "fields": [
+    {"name": "alertId", "type": "string"},
+    {"name": "decisionId", "type": "string"},
+    {"name": "eventId", "type": "string"},
+    {"name": "userId", "type": "string"},
+    {"name": "riskScore", "type": "int"},
+    {"name": "severity", "type": "string"},
+    {"name": "reasonSummary", "type": "string"},
+    {"name": "createdAt", "type": {"type": "long", "logicalType": "timestamp-millis"}},
+    {"name": "source", "type": "string", "default": "flink-risk-engine"}
+  ]
+}
