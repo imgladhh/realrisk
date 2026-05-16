@@ -18,6 +18,8 @@ class MerchantBurstProcessFunctionTest {
       new FlinkRiskJobConfig(
           "localhost:9092",
           "http://localhost:8081",
+          "localhost",
+          6379,
           "raw-events",
           "rule-updates",
           "decision-audit",
@@ -31,6 +33,8 @@ class MerchantBurstProcessFunctionTest {
           85,
           90,
           10,
+          100,
+          40,
           Duration.ofMinutes(5),
           Duration.ofSeconds(5));
 

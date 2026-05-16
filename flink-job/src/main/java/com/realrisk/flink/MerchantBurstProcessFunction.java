@@ -5,6 +5,9 @@ import com.realrisk.avro.RiskDecisionAvro;
 import com.realrisk.avro.RiskEventAvro;
 import com.realrisk.avro.RuleUpdateAvro;
 import com.realrisk.avro.AlertEventAvro;
+import io.lettuce.core.RedisClient;
+import io.lettuce.core.RedisURI;
+import io.lettuce.core.api.StatefulRedisConnection;
 import java.time.Instant;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.state.BroadcastState;
@@ -35,6 +38,9 @@ public class MerchantBurstProcessFunction
   private final FlinkRiskJobConfig config;
   // Keyed state: userId -> latest event timestamp (epoch ms) within the burst window
   private transient MapState<String, Long> userSeenAtState;
+  private transient RedisClient redisClient;
+  private transient StatefulRedisConnection<String, String> redisConnection;
+  private transient RedisUserProfileReader userProfileReader;
 
   public MerchantBurstProcessFunction(FlinkRiskJobConfig config) {
     this.config = config;
@@ -46,6 +52,20 @@ public class MerchantBurstProcessFunction
         getRuntimeContext()
             .getMapState(
                 new MapStateDescriptor<>("merchant-user-seen-at", String.class, Long.class));
+
+    try {
+      redisClient =
+          RedisClient.create(
+              RedisURI.builder()
+                  .withHost(config.redisHost())
+                  .withPort(config.redisPort())
+                  .build());
+      redisConnection = redisClient.connect();
+      userProfileReader = new RedisUserProfileReader(redisConnection.sync());
+    } catch (RuntimeException e) {
+      userProfileReader = new RedisUserProfileReader(null);
+      closeRedisResources();
+    }
   }
 
   @Override
@@ -62,10 +82,12 @@ public class MerchantBurstProcessFunction
     ReadOnlyBroadcastState<String, RuleUpdateAvro> broadcastState =
         ctx.getBroadcastState(RULE_STATE_DESCRIPTOR);
     RuleSet rules = RuleSet.from(config, broadcastState.immutableEntries());
+    UserProfile userProfile = userProfileReader.read(event.getUserId());
 
     RiskEvaluation evaluation =
         new RiskRuleEngine(rules)
-            .evaluate(event, distinctUsersInWindow(), Instant.ofEpochMilli(eventTimestamp));
+            .evaluate(
+                event, userProfile, distinctUsersInWindow(), Instant.ofEpochMilli(eventTimestamp));
 
     out.collect(FlinkRiskMappers.toDecisionAvro(evaluation));
     if (evaluation.riskScore() >= config.highRiskThreshold()) {
@@ -106,5 +128,22 @@ public class MerchantBurstProcessFunction
       count++;
     }
     return count;
+  }
+
+  @Override
+  public void close() throws Exception {
+    closeRedisResources();
+    super.close();
+  }
+
+  private void closeRedisResources() {
+    if (redisConnection != null) {
+      redisConnection.close();
+      redisConnection = null;
+    }
+    if (redisClient != null) {
+      redisClient.shutdown();
+      redisClient = null;
+    }
   }
 }

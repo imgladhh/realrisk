@@ -15,6 +15,8 @@ class RuleSetTest {
       new FlinkRiskJobConfig(
           "localhost:9092",
           "http://localhost:8081",
+          "localhost",
+          6379,
           "raw-events",
           "rule-updates",
           "decision-audit",
@@ -28,6 +30,8 @@ class RuleSetTest {
           85,
           90,
           10,
+          100,
+          40,
           Duration.ofMinutes(5),
           Duration.ofSeconds(5));
 
@@ -40,6 +44,8 @@ class RuleSetTest {
     assertThat(rs.withdrawalWithoutDeviceScore()).isEqualTo(30);
     assertThat(rs.merchantBurstThreshold()).isEqualTo(10);
     assertThat(rs.merchantBurstScore()).isEqualTo(70);
+    assertThat(rs.velocityThreshold7d()).isEqualTo(100);
+    assertThat(rs.highVelocityScore()).isEqualTo(40);
     assertThat(rs.reviewThreshold()).isEqualTo(60);
     assertThat(rs.blockThreshold()).isEqualTo(80);
   }
@@ -99,6 +105,22 @@ class RuleSetTest {
   }
 
   @Test
+  void highVelocityRuleUpdatesThresholdAndScore() {
+    RuleSet rs =
+        RuleSet.from(
+            CONFIG,
+            List.of(
+                entry(
+                    "rule-velocity",
+                    "high_velocity_7d",
+                    true,
+                    Map.of("velocity_threshold", "250", "score_delta", "55"))));
+
+    assertThat(rs.velocityThreshold7d()).isEqualTo(250);
+    assertThat(rs.highVelocityScore()).isEqualTo(55);
+  }
+
+  @Test
   void multipleRulesOfDifferentTypesAllApply() {
     RuleSet rs =
         RuleSet.from(
@@ -115,6 +137,7 @@ class RuleSetTest {
     assertThat(rs.largeAmountCents()).isEqualTo(300_000L);
     assertThat(rs.merchantBurstThreshold()).isEqualTo(5);
     assertThat(rs.blockThreshold()).isEqualTo(70);
+    assertThat(rs.velocityThreshold7d()).isEqualTo(100);
     assertThat(rs.withdrawalWithoutDeviceScore()).isEqualTo(30);
   }
 

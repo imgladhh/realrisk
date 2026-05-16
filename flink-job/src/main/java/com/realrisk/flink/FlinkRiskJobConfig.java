@@ -6,6 +6,8 @@ import java.time.Duration;
 public record FlinkRiskJobConfig(
     String bootstrapServers,
     String schemaRegistryUrl,
+    String redisHost,
+    int redisPort,
     String rawEventsTopic,
     String ruleUpdatesTopic,
     String decisionAuditTopic,
@@ -19,6 +21,8 @@ public record FlinkRiskJobConfig(
     int highRiskThreshold,
     int alertThreshold,
     int merchantBurstThreshold,
+    int velocityThreshold7d,
+    int highVelocityScore,
     Duration merchantBurstWindow,
     Duration watermarkSkew)
     implements Serializable {
@@ -27,6 +31,8 @@ public record FlinkRiskJobConfig(
     return new FlinkRiskJobConfig(
         env("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
         env("SCHEMA_REGISTRY_URL", "http://localhost:8081"),
+        env("REDIS_HOST", "localhost"),
+        envInt("REDIS_PORT", 6379),
         env("RAW_EVENTS_TOPIC", "raw-events"),
         env("RULE_UPDATES_TOPIC", "rule-updates"),
         env("DECISION_AUDIT_TOPIC", "decision-audit"),
@@ -40,6 +46,8 @@ public record FlinkRiskJobConfig(
         envInt("FLINK_HIGH_RISK_THRESHOLD", 85),
         envInt("FLINK_ALERT_THRESHOLD", 90),
         envInt("FLINK_MERCHANT_BURST_THRESHOLD", 10),
+        envInt("FLINK_VELOCITY_THRESHOLD_7D", 100),
+        envInt("FLINK_HIGH_VELOCITY_SCORE", 40),
         Duration.ofMillis(envLong("FLINK_MERCHANT_BURST_WINDOW_MS", 300_000L)),
         Duration.ofMillis(envLong("FLINK_WATERMARK_SKEW_MS", 5_000L)));
   }

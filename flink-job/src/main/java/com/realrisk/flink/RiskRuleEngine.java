@@ -17,9 +17,22 @@ public final class RiskRuleEngine {
   }
 
   public RiskEvaluation evaluate(
-      RiskEventAvro event, int merchantDistinctUsers, Instant createdAt) {
+      RiskEventAvro event,
+      UserProfile userProfile,
+      int merchantDistinctUsers,
+      Instant createdAt) {
     var reasons = new ArrayList<String>();
     int score = 0;
+
+    if (userProfile.blacklisted()) {
+      reasons.add("blacklisted_user");
+      score += 100;
+    }
+
+    if (userProfile.velocity7d() >= rules.velocityThreshold7d()) {
+      reasons.add("high_velocity_7d");
+      score += rules.highVelocityScore();
+    }
 
     if (event.getAmountCents() >= rules.largeAmountCents()) {
       reasons.add("large_amount");

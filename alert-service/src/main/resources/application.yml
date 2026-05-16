@@ -1,0 +1,41 @@
+spring:
+  application:
+    name: alert-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:55432/realrisk}
+    username: ${DB_USER:realrisk}
+    password: ${DB_PASSWORD:realrisk}
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 50ms
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    properties:
+      schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8081}
+      rule.service.loader.enable: false
+    consumer:
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: io.confluent.kafka.serializers.KafkaAvroDeserializer
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+realrisk:
+  alert:
+    topic: ${ALERT_EVENTS_TOPIC:alert-events}
+    consumer-group: ${ALERT_CONSUMER_GROUP:alert-service}
+    rate-limit-window: ${ALERT_RATE_LIMIT_WINDOW:15m}
+    consumer-retry-backoff: ${ALERT_CONSUMER_RETRY_BACKOFF:1s}
+    consumer-retry-attempts: ${ALERT_CONSUMER_RETRY_ATTEMPTS:2}
+    routing:
+      MEDIUM: [email]
+      HIGH: [email, sms]
+      CRITICAL: [email, sms, push]

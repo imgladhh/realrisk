@@ -2,7 +2,7 @@
 
 > Living context for AI-assisted development sessions.
 > Update `Done`, `In Progress`, `Next`, and `Known Issues` at the end of each session.
-> Last updated: 2026-05-15
+> Last updated: 2026-05-16
 
 ---
 
@@ -13,6 +13,7 @@ RealRisk is a two-tier payment risk engine:
 - Fast path: Spring Boot API Gateway -> Redis blacklist check + Lua per-user rate limit -> publish `RiskEventAvro` to `raw-events`
 - Slow path: Flink job consumes `raw-events`, evaluates rules, emits `RiskDecisionAvro` to `decision-audit`, and emits `HighRiskEventAvro` / `AlertEventAvro` to side outputs
 - Dynamic rules: compacted `rule-updates` topic -> Flink broadcast state -> `RuleSet` rebuilt per event
+- Redis profile enrichment: Flink reads per-user blacklist and 7-day velocity from Redis before scoring
 
 Full topology: `docs/architecture-diagram.md`
 
@@ -40,6 +41,35 @@ Full topology: `docs/architecture-diagram.md`
     - default large-amount rule -> `BLOCK / 80`
     - raised threshold -> `ALLOW / 0`
     - disabled override -> fallback to default -> `BLOCK / 80`
+- Phase 3
+  - Redis-backed `UserProfile` enrichment added to the Flink job
+  - New rules:
+    - `blacklisted_user` -> `+100`
+    - `high_velocity_7d` -> `+40` by default
+  - Redis lookup degrades to an empty profile on connection/runtime errors
+  - Unit tests added for profile reads and profile-aware scoring
+  - E2E validated:
+    - `blacklist:user-e2e-04 = 1`
+    - `evt-e2e-04e` -> `BLOCK / 100 / ["blacklisted_user"]`
+    - `velocity:count:7d:user-e2e-04 = 125`
+    - `evt-e2e-04f` -> `ALLOW / 40 / ["high_velocity_7d"]`
+- Phase 4
+  - New `alert-service/` Spring Boot consumer module added
+  - Consumes `alert-events` with independent Kafka consumer group `alert-service`
+  - Implements:
+    - PostgreSQL-backed alert idempotency via `alert_log`
+    - Redis-backed per-user per-severity notification rate limiting
+    - config-driven routing
+    - logging stub channels for email / sms / push
+  - Verification:
+    - `alert-service` unit tests pass
+    - Kafka -> DB integration test exists and auto-skips when Docker is unavailable to the JVM
+    - Local smoke test validated:
+      - `alert-e2e-01`
+      - `severity = HIGH`
+      - `status = PROCESSED`
+      - `channels_notified = {email,sms}`
+      - Redis key `alert:ratelimit:user-alert-01:HIGH = 1`
 - Tooling / docs
   - `scripts/run-api.ps1`
   - `scripts/send-rule-update.ps1`
@@ -48,21 +78,14 @@ Full topology: `docs/architecture-diagram.md`
 ### In Progress
 
 - No active implementation branch at the moment
-- Main focus has shifted from fixing Flink startup/runtime issues to planning the next phase cleanly
+- Main remaining work is review, polish, and deciding whether to add a combined-profile E2E case
 
 ### Next
 
-1. Phase 3: async Redis profile enrichment in Flink
-   - Add async lookup before rule evaluation
-   - Enrich with profile fields such as blacklist, velocity, lifetime amount
-   - Extend `RiskRuleEngine` with profile-aware rules
-2. Add schema registration helper
+1. Add schema registration helper
    - `scripts/register-schemas.ps1`
    - Register all `.avsc` files into local Schema Registry automatically
-3. Phase 4: Alert Service
-   - Consumer for `alert-events`
-   - Start with stdout/log stub, then add real notification integration
-4. Phase 5: K8s / Flink operator deployment path
+2. Phase 5: K8s / Flink operator deployment path
    - FlinkDeployment CRD
    - MinIO or S3 checkpoint storage
    - Operator-based local/prod alignment
@@ -83,9 +106,13 @@ Full topology: `docs/architecture-diagram.md`
   - `KeyedBroadcastProcessFunction`
   - Broadcast state + side outputs
 - `RiskRuleEngine.java`
-  - Pure scoring logic
+  - Pure scoring logic, now profile-aware via `UserProfile`
 - `RuleSet.java`
-  - Immutable effective rule snapshot
+  - Immutable effective rule snapshot, including velocity thresholds
+- `RedisUserProfileReader.java`
+  - Reads `blacklist:<userId>` and `velocity:count:7d:<userId>` from Redis
+- `UserProfile.java`
+  - In-memory profile object passed into scoring
 - `RiskEvaluation.java`
   - Internal evaluation record; should stay inside operator flow only
 - `FlinkRiskMappers.java`
@@ -111,6 +138,23 @@ Full topology: `docs/architecture-diagram.md`
   - Starts Spring API with repo-local Maven and local infra defaults
 - `send-rule-update.ps1`
   - Sends a `RuleUpdateAvro` message through the schema-registry container
+
+### Alert Service
+
+`alert-service/src/main/java/com/realrisk/alertservice/`
+
+- `AlertServiceApplication.java`
+  - Standalone Spring Boot entrypoint
+- `service/AlertProcessor.java`
+  - Idempotency, rate limiting, routing, and persistence flow
+- `service/AlertEventListener.java`
+  - Kafka consumer entrypoint for `AlertEventAvro`
+- `notify/`
+  - `NotificationRouter` plus stub channel implementations
+- `rate/`
+  - Redis-backed per-user severity limiter
+- `persistence/AlertLogRepository.java`
+  - `alert_log` insert/update/read access
 
 ### Infra
 
@@ -144,6 +188,15 @@ $env:KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
 $env:SCHEMA_REGISTRY_URL = "http://localhost:8081"
 $env:RULE_UPDATES_TOPIC = "rule-updates"
 java -jar .\flink-job\target\realrisk-flink-job-0.1.0-SNAPSHOT.jar
+```
+
+### Seed Redis profile data manually
+
+```powershell
+docker exec realrisk-redis redis-cli SET blacklist:user-phase3 1
+docker exec realrisk-redis redis-cli SET velocity:count:7d:user-phase3 125
+docker exec realrisk-redis redis-cli DEL blacklist:user-phase3
+docker exec realrisk-redis redis-cli DEL velocity:count:7d:user-phase3
 ```
 
 ### Start Spring API
@@ -196,10 +249,14 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
 | `FLINK_HIGH_RISK_THRESHOLD` | `85` | `score >= 85` -> emit high-risk event |
 | `FLINK_ALERT_THRESHOLD` | `90` | `score >= 90` -> emit alert |
 | `FLINK_MERCHANT_BURST_THRESHOLD` | `10` | Distinct users in window |
+| `FLINK_VELOCITY_THRESHOLD_7D` | `100` | 7-day count for `high_velocity_7d` |
+| `FLINK_HIGH_VELOCITY_SCORE` | `40` | Score added by `high_velocity_7d` |
 | `FLINK_MERCHANT_BURST_WINDOW_MS` | `300_000` | 5 minutes |
 | `FLINK_WATERMARK_SKEW_MS` | `5_000` | Allowed out-of-orderness |
 | `FLINK_CHECKPOINTS_DIR` | `file:///tmp/realrisk-flink-checkpoints` | Local checkpoint path |
 | `FLINK_PARALLELISM` | `2` | Local parallelism |
+| `REDIS_HOST` | `localhost` | Redis host for Flink profile enrichment |
+| `REDIS_PORT` | `6379` | Redis port for Flink profile enrichment |
 
 ### RuleSet parameters
 
@@ -208,6 +265,7 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
 | `large_amount` | `amount_cents`, `score_delta` |
 | `withdrawal_without_device` | `score_delta` |
 | `merchant_multi_user_burst` | `burst_threshold`, `score_delta` |
+| `high_velocity_7d` | `velocity_threshold`, `score_delta` |
 | `global` | `review_threshold`, `block_threshold` |
 
 `enabled = false` means remove the rule from broadcast state and fall back to config defaults.
@@ -243,6 +301,32 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
 - Checkpoint interval is 30 seconds
 - Kafka sinks are `AT_LEAST_ONCE`
 - Local E2E latency of up to about 30 seconds is normal
+- For local tests after a fresh Flink restart, `raw-events` must be produced after the
+  new job is already running because the source starts from `latest()` on fresh groups
+
+### Redis profile enrichment
+
+- Flink uses synchronous Redis reads inside `MerchantBurstProcessFunction`
+- This phase intentionally does not use `AsyncDataStream`
+- Redis failures degrade to `UserProfile.empty()` instead of failing the job
+- The current profile contract is:
+  - `blacklist:<userId>` -> any string value means blacklisted
+  - `velocity:count:7d:<userId>` -> integer count for the last 7 days
+
+### Alert Service behavior
+
+- `alert-service` uses its own Kafka consumer group: `alert-service`
+- Routing is configuration-driven (via `AlertProperties`):
+  - `MEDIUM` -> email
+  - `HIGH` -> email + sms
+  - `CRITICAL` -> email + sms + push
+- Deduplication key is `alertId` (PostgreSQL `ON CONFLICT DO NOTHING`)
+- `alert_log.status` tracks `PENDING` / `PROCESSED` / `RATE_LIMITED`
+  - PENDING rows are retried on redelivery instead of being skipped as duplicates
+- Redis key format for rate limiting: `alert:ratelimit:<userId>:<severity>`
+- Consumer error handling: `DefaultErrorHandler` + `FixedBackOff(1s, 2 attempts)`
+- Current channel implementations are logging stubs only
+- DB migrations live in root `src/main/resources/db/migration/`; alert-service pulls them in via pom.xml resource include
 
 ### Decision idempotency
 
@@ -259,6 +343,13 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
 - Local Windows + Docker + Flink runs can be noisy; always focus on the first `Caused by:` line, not the later `CANCELING/CANCELED` cleanup logs
 - Maven is not installed globally on this machine; prefer repo-local Maven:
   - `.\.tools\maven\bin\mvn.cmd`
+- `kafka-avro-console-consumer --from-beginning --timeout-ms ...` timing out with
+  `Processed a total of 0 messages` is a valid signal that the topic is actually empty,
+  not necessarily a consumer bug
+- `alert-service` integration test is written with Testcontainers but currently auto-skips in
+  this environment because the JVM cannot see a valid Docker socket
+- `alert-service` now has explicit consumer retry/backoff, but still has no dead-letter topic
+  - acceptable for Phase 4, but should be tightened before K8s / production rollout
 
 ---
 

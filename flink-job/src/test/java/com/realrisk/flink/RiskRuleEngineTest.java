@@ -9,11 +9,12 @@ import org.junit.jupiter.api.Test;
 
 class RiskRuleEngineTest {
 
-  // Default RuleSet matching config defaults used before any rule broadcast arrives.
   private static final FlinkRiskJobConfig CONFIG =
       new FlinkRiskJobConfig(
           "localhost:9092",
           "http://localhost:8081",
+          "localhost",
+          6379,
           "raw-events",
           "rule-updates",
           "decision-audit",
@@ -27,6 +28,8 @@ class RiskRuleEngineTest {
           85,
           90,
           10,
+          100,
+          40,
           Duration.ofMinutes(5),
           Duration.ofSeconds(5));
 
@@ -37,7 +40,12 @@ class RiskRuleEngineTest {
   @Test
   void largeAmountBecomesBlockingDecision() {
     RiskEvaluation evaluation =
-        engine().evaluate(event("TRANSACTION", 2_000_000L, "device-1", "merchant-1"), 1, instant());
+        engine()
+            .evaluate(
+                event("TRANSACTION", 2_000_000L, "device-1", "merchant-1"),
+                UserProfile.empty(),
+                1,
+                instant());
 
     assertThat(evaluation.decision()).isEqualTo("BLOCK");
     assertThat(evaluation.riskScore()).isEqualTo(80);
@@ -47,7 +55,12 @@ class RiskRuleEngineTest {
   @Test
   void merchantBurstElevatesCrossUserPattern() {
     RiskEvaluation evaluation =
-        engine().evaluate(event("TRANSACTION", 10_000L, "device-1", "merchant-1"), 10, instant());
+        engine()
+            .evaluate(
+                event("TRANSACTION", 10_000L, "device-1", "merchant-1"),
+                UserProfile.empty(),
+                10,
+                instant());
 
     assertThat(evaluation.decision()).isEqualTo("REVIEW");
     assertThat(evaluation.riskScore()).isEqualTo(70);
@@ -57,7 +70,12 @@ class RiskRuleEngineTest {
   @Test
   void withdrawalWithoutDeviceStacksWithBurst() {
     RiskEvaluation evaluation =
-        engine().evaluate(event("WITHDRAWAL", 10_000L, null, "merchant-1"), 10, instant());
+        engine()
+            .evaluate(
+                event("WITHDRAWAL", 10_000L, null, "merchant-1"),
+                UserProfile.empty(),
+                10,
+                instant());
 
     assertThat(evaluation.decision()).isEqualTo("BLOCK");
     assertThat(evaluation.riskScore()).isEqualTo(100);
@@ -67,7 +85,8 @@ class RiskRuleEngineTest {
 
   @Test
   void allowDecisionKeepsReasonsEmpty() {
-    RiskEvaluation evaluation = engine().evaluate(event("LOGIN", 0L, "device-1", null), 0, instant());
+    RiskEvaluation evaluation =
+        engine().evaluate(event("LOGIN", 0L, "device-1", null), UserProfile.empty(), 0, instant());
 
     assertThat(evaluation.decision()).isEqualTo("ALLOW");
     assertThat(evaluation.riskScore()).isZero();
@@ -76,14 +95,15 @@ class RiskRuleEngineTest {
 
   @Test
   void dynamicLargeAmountThresholdIsRespected() {
-    // Simulate a rule broadcast that lowers the large_amount threshold to 500_000
-    // and raises the score delta to 90 (enough to push into BLOCK territory alone).
-    RuleSet customRules = new RuleSet(500_000L, 90, 30, 10, 70, 60, 80);
+    RuleSet customRules = new RuleSet(500_000L, 90, 30, 10, 70, 100, 40, 60, 80);
     RiskRuleEngine customEngine = new RiskRuleEngine(customRules);
 
-    // 600_000 < default 1_000_000 threshold, but > new 500_000 threshold
     RiskEvaluation evaluation =
-        customEngine.evaluate(event("TRANSACTION", 600_000L, "device-1", "merchant-1"), 0, instant());
+        customEngine.evaluate(
+            event("TRANSACTION", 600_000L, "device-1", "merchant-1"),
+            UserProfile.empty(),
+            0,
+            instant());
 
     assertThat(evaluation.decision()).isEqualTo("BLOCK");
     assertThat(evaluation.riskScore()).isEqualTo(90);
@@ -92,17 +112,49 @@ class RiskRuleEngineTest {
 
   @Test
   void dynamicBurstThresholdIsRespected() {
-    // Lower burst threshold from 10 to 3
-    RuleSet customRules = new RuleSet(1_000_000L, 80, 30, 3, 70, 60, 80);
+    RuleSet customRules = new RuleSet(1_000_000L, 80, 30, 3, 70, 100, 40, 60, 80);
     RiskRuleEngine customEngine = new RiskRuleEngine(customRules);
 
-    // distinctUsers=5 would not trigger at default threshold=10, but triggers at new threshold=3
     RiskEvaluation evaluation =
-        customEngine.evaluate(event("TRANSACTION", 10_000L, "device-1", "merchant-1"), 5, instant());
+        customEngine.evaluate(
+            event("TRANSACTION", 10_000L, "device-1", "merchant-1"),
+            UserProfile.empty(),
+            5,
+            instant());
 
     assertThat(evaluation.decision()).isEqualTo("REVIEW");
     assertThat(evaluation.riskScore()).isEqualTo(70);
     assertThat(evaluation.reasons()).containsExactly("merchant_multi_user_burst");
+  }
+
+  @Test
+  void blacklistedUserBecomesBlockingDecision() {
+    RiskEvaluation evaluation =
+        engine()
+            .evaluate(
+                event("TRANSACTION", 10_000L, "device-1", "merchant-1"),
+                new UserProfile(true, 0),
+                0,
+                instant());
+
+    assertThat(evaluation.decision()).isEqualTo("BLOCK");
+    assertThat(evaluation.riskScore()).isEqualTo(100);
+    assertThat(evaluation.reasons()).containsExactly("blacklisted_user");
+  }
+
+  @Test
+  void highVelocityAddsScore() {
+    RiskEvaluation evaluation =
+        engine()
+            .evaluate(
+                event("TRANSACTION", 10_000L, "device-1", "merchant-1"),
+                new UserProfile(false, 100),
+                0,
+                instant());
+
+    assertThat(evaluation.decision()).isEqualTo("ALLOW");
+    assertThat(evaluation.riskScore()).isEqualTo(40);
+    assertThat(evaluation.reasons()).containsExactly("high_velocity_7d");
   }
 
   private RiskEventAvro event(

@@ -15,6 +15,8 @@ public record RuleSet(
     int withdrawalWithoutDeviceScore,
     int merchantBurstThreshold,
     int merchantBurstScore,
+    int velocityThreshold7d,
+    int highVelocityScore,
     int reviewThreshold,
     int blockThreshold)
     implements Serializable {
@@ -27,6 +29,8 @@ public record RuleSet(
         30,
         config.merchantBurstThreshold(),
         70,
+        config.velocityThreshold7d(),
+        config.highVelocityScore(),
         config.reviewThreshold(),
         config.blockThreshold());
   }
@@ -46,6 +50,8 @@ public record RuleSet(
     int withdrawalScore = 30;
     int burstThreshold = config.merchantBurstThreshold();
     int burstScore = 70;
+    int velocityThreshold7d = config.velocityThreshold7d();
+    int highVelocityScore = config.highVelocityScore();
     int reviewThreshold = config.reviewThreshold();
     int blockThreshold = config.blockThreshold();
 
@@ -77,6 +83,14 @@ public record RuleSet(
             burstScore = Integer.parseInt(p.get("score_delta"));
           }
         }
+        case "high_velocity_7d" -> {
+          if (p.containsKey("velocity_threshold")) {
+            velocityThreshold7d = Integer.parseInt(p.get("velocity_threshold"));
+          }
+          if (p.containsKey("score_delta")) {
+            highVelocityScore = Integer.parseInt(p.get("score_delta"));
+          }
+        }
         case "global" -> {
           if (p.containsKey("review_threshold")) {
             reviewThreshold = Integer.parseInt(p.get("review_threshold"));
@@ -97,6 +111,8 @@ public record RuleSet(
         withdrawalScore,
         burstThreshold,
         burstScore,
+        velocityThreshold7d,
+        highVelocityScore,
         reviewThreshold,
         blockThreshold);
   }
