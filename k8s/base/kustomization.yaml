@@ -1,5 +1,7 @@
 resources:
   - api-gateway
   - alert-service
+  - kafka
   - flink
   - minio
+  - schema-registry

@@ -98,6 +98,33 @@ Full topology: `docs/architecture-diagram.md`
       - `evt-k8s-alert-01` -> `BLOCK / 100 / ["blacklisted_user"]`
       - corresponding `alert_log` row persisted for `user-k8s-alert`
       - alert severity routed as `CRITICAL` with `{email,sms,push}`
+- Phase 6
+  - Added `k8s/base/kafka/`
+    - Strimzi `Kafka` CR
+    - KRaft `KafkaNodePool`
+    - `KafkaTopic` CRs for `raw-events`, `raw-audit`, `decision-audit`, `high-risk-events`, `alert-events`, `rule-updates`
+  - Added `k8s/base/schema-registry/` Deployment + Service
+  - Added Helm values under:
+    - `k8s/overlays/local/helm-values/`
+    - `k8s/overlays/prod/helm-values/`
+  - Added `scripts/install-infra.ps1` for:
+    - Strimzi Kafka Operator
+    - Bitnami Redis
+    - Bitnami PostgreSQL
+  - Strimzi chart version pinned in `install-infra.ps1`
+  - Updated app and Flink ConfigMaps to use in-cluster DNS instead of `host.docker.internal`
+  - Validation:
+    - `kubectl kustomize k8s/overlays/local` renders successfully
+    - `kubectl kustomize k8s/overlays/prod` renders successfully
+    - in-cluster Kafka became `Ready` on KRaft
+    - all `KafkaTopic` resources became `READY=True`
+    - `evt-phase6-05` -> `BLOCK / 80 / ["large_amount"]` confirmed in in-cluster `decision-audit`
+    - `evt-phase6-alert-01` -> alert row persisted in in-cluster PostgreSQL:
+      - `user_id = user-phase6-alert`
+      - `severity = CRITICAL`
+      - `status = PROCESSED`
+      - `channels_notified = {email,sms,push}`
+      - `reason_summary = blacklisted_user`
 - Tooling / docs
   - `scripts/run-api.ps1`
   - `scripts/send-rule-update.ps1`
@@ -105,19 +132,34 @@ Full topology: `docs/architecture-diagram.md`
 
 ### In Progress
 
-- No active feature phase in progress at the moment
+- `scripts/register-schemas.ps1` still not implemented
+- Current Phase 6 validation found a Strimzi startup compatibility issue on Kubernetes 1.35:
+  - older operator startup can fail while parsing Kubernetes `VersionInfo`
+  - `install-infra.ps1` now pins Strimzi `0.45.2` and sets `STRIMZI_KUBERNETES_VERSION`
+    dynamically from `kubectl version`
+- Strimzi in `strimzi-system` must watch the `realrisk` namespace; `install-infra.ps1`
+  now enables `watchAnyNamespace=true` so the operator reconciles `Kafka` / `KafkaTopic`
+  CRs created outside its own namespace
+- Phase 6 local validation hit a single-node ZooKeeper runtime failure
+  (`Leader.getDesignatedLeader -> NoSuchElementException`) even after Strimzi
+  reconciliation issues were fixed
+- Local Kafka manifests now switch to Strimzi KRaft mode with a single dual-role
+  `KafkaNodePool` instead of ZooKeeper
+- Phase 6 local validation also exposed a few recurring operational gotchas:
+  - Strimzi operator in `strimzi-system` must watch `realrisk`
+  - Schema Registry bootstrap must be plain `host:port`, not `PLAINTEXT://...`
+  - after Kafka path changes, Flink should be restarted so pods consume the new ConfigMap
+  - Phase 6 verification commands should run inside the Kubernetes Schema Registry pod,
+    not the old Docker Compose container
 
 ### Next
 
 1. Add schema registration helper
    - `scripts/register-schemas.ps1`
    - Register all `.avsc` files into local Schema Registry automatically
-2. Phase 6: Kafka / infra on Kubernetes
-   - likely Strimzi or equivalent
-   - remove the host-network bridge assumptions from the local overlay
-3. Operational polish for Phase 5
-   - document the `rule-updates` topic bootstrap requirement explicitly
-   - decide whether API image should create/ensure `rule-updates` automatically in K8s flows
+2. Phase 7 candidate
+   - CloudNativePG or equivalent production-grade PostgreSQL operator
+   - stronger production HA separation for Redis/PostgreSQL
 
 ---
 
@@ -429,6 +471,8 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
   - acceptable for Phase 4, but should be tightened before K8s / production rollout
 - `alert-service` packaging can fail if `alert-service-0.1.0-SNAPSHOT.jar` is locked by a running
   local process; stop the running jar before rebuilding the image layer
+- Long-lived `kubectl exec -it ... kafka-avro-console-consumer` sessions can exit with `137`
+  during local validation; prefer one-shot produce/consume checks when debugging Phase 6
 
 ---
 

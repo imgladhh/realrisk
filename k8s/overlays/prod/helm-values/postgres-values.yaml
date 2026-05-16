@@ -1,0 +1,9 @@
+auth:
+  username: realrisk
+  password: change-me
+  database: realrisk
+primary:
+  persistence:
+    enabled: true
+readReplicas:
+  replicaCount: 2

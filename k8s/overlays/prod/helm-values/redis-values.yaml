@@ -1,0 +1,10 @@
+architecture: replication
+auth:
+  enabled: true
+master:
+  persistence:
+    enabled: true
+replica:
+  replicaCount: 2
+sentinel:
+  enabled: true

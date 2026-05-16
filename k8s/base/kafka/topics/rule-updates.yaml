@@ -1,0 +1,11 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: rule-updates
+  labels:
+    strimzi.io/cluster: realrisk-kafka
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    cleanup.policy: compact

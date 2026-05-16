@@ -506,6 +506,182 @@ Phase 5 has now been validated on a local `kind` cluster:
 The remaining Phase 5 follow-up is documentation and operational polish rather
 than basic functionality.
 
+## Phase 6: In-Cluster Kafka and Infra
+
+Phase 6 removes the Kubernetes-to-Docker host bridge from the main path and
+moves the remaining shared infrastructure into the cluster:
+
+- Kafka via Strimzi (`Kafka` + `KafkaTopic` CRs)
+- Schema Registry as a Kubernetes `Deployment`
+- Redis via Bitnami Helm chart
+- PostgreSQL via Bitnami Helm chart
+
+### What is included
+
+- `k8s/base/kafka/`
+  - `Kafka` cluster CR
+  - `KafkaNodePool` for local KRaft dual-role nodes
+  - `KafkaTopic` CRs for:
+    - `raw-events`
+    - `raw-audit`
+    - `decision-audit`
+    - `high-risk-events`
+    - `alert-events`
+    - `rule-updates`
+- `k8s/base/schema-registry/`
+  - Schema Registry `Deployment` + `Service`
+- Helm values:
+  - `k8s/overlays/local/helm-values/redis-values.yaml`
+  - `k8s/overlays/local/helm-values/postgres-values.yaml`
+  - `k8s/overlays/prod/helm-values/redis-values.yaml`
+  - `k8s/overlays/prod/helm-values/postgres-values.yaml`
+- `scripts/install-infra.ps1`
+
+### In-cluster service addresses
+
+The local and prod overlays now target Kubernetes DNS names instead of
+`host.docker.internal`:
+
+- Kafka: `realrisk-kafka-kafka-bootstrap.realrisk.svc.cluster.local:9092`
+- Schema Registry: `http://realrisk-schema-registry.realrisk.svc.cluster.local:8081`
+- Redis: `realrisk-redis-master.realrisk.svc.cluster.local:6379`
+- PostgreSQL: `realrisk-postgresql.realrisk.svc.cluster.local:5432`
+
+### Install infra for local validation
+
+```powershell
+.\scripts\install-infra.ps1 -Overlay local
+kubectl apply -k .\k8s\overlays\local
+kubectl wait kafka/realrisk-kafka --for=condition=Ready -n realrisk --timeout=300s
+```
+
+`install-infra.ps1` installs:
+
+- `strimzi-kafka-operator`
+- `realrisk-redis`
+- `realrisk-postgresql`
+
+The Strimzi operator chart version is pinned in `install-infra.ps1` so CRD/API
+behavior stays stable across repeated installs. The script also sets
+`STRIMZI_KUBERNETES_VERSION` on the operator deployment based on the current
+cluster version to avoid newer Kubernetes `VersionInfo` parsing regressions. The
+operator is installed with `watchAnyNamespace=true` so a cluster operator in
+`strimzi-system` can reconcile the `Kafka` and `KafkaTopic` CRs created in the
+`realrisk` application namespace.
+
+### Expected startup timing
+
+After `kubectl apply`, the Strimzi operator still needs time to create the Kafka
+cluster itself. During that window:
+
+- `KafkaTopic` resources may remain pending
+- Schema Registry may temporarily fail to connect and restart
+
+That is expected on a fresh local cluster. Wait for the `Kafka` CR to become
+Ready before judging Schema Registry health:
+
+```powershell
+kubectl wait kafka/realrisk-kafka --for=condition=Ready -n realrisk --timeout=300s
+```
+
+### Current validation level
+
+Phase 6 has now been validated on a local cluster:
+
+- `kubectl kustomize .\k8s\overlays\local` renders successfully
+- `kubectl kustomize .\k8s\overlays\prod` renders successfully
+- app ConfigMaps use in-cluster DNS instead of host bridges
+- Strimzi Kafka and `KafkaTopic` CRs are part of the base overlay
+- Schema Registry runs inside Kubernetes
+- Redis and PostgreSQL run inside Kubernetes via Helm
+- all declared `KafkaTopic` resources became `READY=True`
+- KRaft Kafka cluster became `Ready`
+- in-cluster Flink consumed from in-cluster Kafka and produced to `decision-audit`
+- in-cluster alert path persisted to PostgreSQL `alert_log`
+
+Validated examples:
+
+- `evt-phase6-05` -> `decision-audit`
+  - `decision = BLOCK`
+  - `riskScore = 80`
+  - `reasons = ["large_amount"]`
+- `evt-phase6-alert-01` -> `alert_log`
+  - `user_id = user-phase6-alert`
+  - `severity = CRITICAL`
+  - `status = PROCESSED`
+  - `channels_notified = {email,sms,push}`
+  - `reason_summary = blacklisted_user`
+
+### Local mode note
+
+The local Phase 6 Kafka deployment now uses **KRaft** with a single dual-role
+`KafkaNodePool` instead of single-node ZooKeeper. This avoids a local-only
+single-replica ZooKeeper failure mode observed during validation and aligns the
+dev topology more closely with Kafka's forward path.
+
+### Phase 6 local validation pitfalls
+
+These were all hit during the first end-to-end validation and are worth keeping
+in mind for future local runs:
+
+1. **Strimzi / Kubernetes version compatibility**
+   - On Kubernetes `1.35`, older Strimzi/Fabric8 startup can fail while parsing
+     `VersionInfo` (for example around `emulationMajor`).
+   - `scripts/install-infra.ps1` now mitigates this by:
+     - pinning Strimzi `0.45.2`
+     - setting `STRIMZI_KUBERNETES_VERSION` from `kubectl version`
+
+2. **Namespace watch scope matters**
+   - The Strimzi operator is installed in `strimzi-system`
+   - The `Kafka` and `KafkaTopic` CRs live in `realrisk`
+   - The install script therefore enables `watchAnyNamespace=true`
+
+3. **Kafka version must match the Strimzi line**
+   - The local `Kafka` CR now uses `3.9.2`
+   - Earlier values such as `3.7.1` were rejected by the current operator
+
+4. **Local Phase 6 uses KRaft, not ZooKeeper**
+   - Single-node ZooKeeper hit a local runtime failure during validation
+   - If Kafka stalls and only ZooKeeper pods appear, verify the manifests still
+     use the KRaft `KafkaNodePool` layout
+
+5. **Schema Registry bootstrap format is plain host:port**
+   - `SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS` should be:
+     - `realrisk-kafka-kafka-bootstrap:9092`
+   - Do not prefix it with `PLAINTEXT://`
+
+6. **Restart Flink after switching infra generations**
+   - If Kafka endpoints or ConfigMaps change, existing Flink pods may still be
+     connected to the old cluster
+   - Recreate the Flink JobManager pod so the deployment picks up the latest
+     ConfigMap values
+
+7. **Use in-cluster validation commands for Phase 6**
+   - Compose-based consumers/producers (`docker exec realrisk-schema-registry ...`)
+     talk to the old Docker Kafka path, not the in-cluster Kafka path
+   - For Phase 6 validation, run Kafka CLI commands inside the Kubernetes
+     Schema Registry pod with:
+     - `--bootstrap-server realrisk-kafka-kafka-bootstrap:9092`
+     - `--property schema.registry.url=http://realrisk-schema-registry:8081`
+
+8. **PowerShell and long-lived `kubectl exec` can be misleading**
+   - PowerShell may try to expand `$(...)` locally before it reaches the pod
+   - Long-running `kubectl exec -it ... kafka-avro-console-consumer` sessions
+     may exit with `137`; one-shot produce/consume checks are often more stable
+
+### Phase 6 validation sequence
+
+For the cleanest local verification flow:
+
+1. `.\scripts\install-infra.ps1 -Overlay local`
+2. `kubectl apply -k .\k8s\overlays\local`
+3. `kubectl wait kafka/realrisk-kafka --for=condition=Ready -n realrisk --timeout=300s`
+4. `kubectl get kafkatopic -n realrisk`
+   - all topics should show `READY=True`
+5. confirm Schema Registry is `1/1 Running`
+6. recreate the Flink JobManager pod once after the Phase 6 Kafka cutover
+7. run produce/consume checks from inside the Kubernetes Schema Registry pod
+
 ---
 
 ## Ingest Example

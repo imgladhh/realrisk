@@ -3,6 +3,6 @@ kind: ConfigMap
 metadata:
   name: realrisk-flink-config
 data:
-  REDIS_HOST: host.docker.internal
-  KAFKA_BOOTSTRAP_SERVERS: host.docker.internal:19092
-  SCHEMA_REGISTRY_URL: http://host.docker.internal:8081
+  REDIS_HOST: realrisk-redis-master.realrisk.svc.cluster.local
+  KAFKA_BOOTSTRAP_SERVERS: realrisk-kafka-kafka-bootstrap.realrisk.svc.cluster.local:9092
+  SCHEMA_REGISTRY_URL: http://realrisk-schema-registry.realrisk.svc.cluster.local:8081

@@ -1,0 +1,11 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: raw-audit
+  labels:
+    strimzi.io/cluster: realrisk-kafka
+spec:
+  partitions: 8
+  replicas: 1
+  config:
+    retention.ms: 2592000000

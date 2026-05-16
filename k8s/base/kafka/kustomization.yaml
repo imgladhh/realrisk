@@ -1,0 +1,9 @@
+resources:
+  - kafka.yaml
+  - nodepool.yaml
+  - topics/raw-events.yaml
+  - topics/raw-audit.yaml
+  - topics/decision-audit.yaml
+  - topics/high-risk-events.yaml
+  - topics/alert-events.yaml
+  - topics/rule-updates.yaml
