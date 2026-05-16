@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: realrisk-alert-service-config
+data:
+  SERVER_PORT: "8080"
+  DB_URL: jdbc:postgresql://postgres.invalid:5432/realrisk
+  DB_USER: realrisk
+  REDIS_HOST: redis.invalid
+  REDIS_PORT: "6379"
+  KAFKA_BOOTSTRAP_SERVERS: kafka.invalid:9092
+  SCHEMA_REGISTRY_URL: http://schema-registry.invalid:8081
+  ALERT_EVENTS_TOPIC: alert-events
+  ALERT_CONSUMER_GROUP: alert-service
+  ALERT_RATE_LIMIT_WINDOW: 15m
+  ALERT_CONSUMER_RETRY_BACKOFF: 1s
+  ALERT_CONSUMER_RETRY_ATTEMPTS: "2"

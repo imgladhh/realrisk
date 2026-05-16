@@ -1,0 +1,15 @@
+namespace: realrisk
+
+resources:
+  - namespace.yaml
+  - ../../base
+  - realrisk-app-secrets.yaml
+  - realrisk-minio-credentials.yaml
+
+patches:
+  - path: api-gateway-configmap-patch.yaml
+  - path: alert-service-configmap-patch.yaml
+  - path: flink-configmap-patch.yaml
+  - path: api-gateway-deployment-patch.yaml
+  - path: alert-service-deployment-patch.yaml
+  - path: flink-deployment-patch.yaml

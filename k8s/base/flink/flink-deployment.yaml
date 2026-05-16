@@ -1,0 +1,54 @@
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: realrisk-flink
+spec:
+  image: realrisk-flink:latest
+  imagePullPolicy: IfNotPresent
+  flinkVersion: v1_20
+  mode: native
+  serviceAccount: realrisk-flink
+  flinkConfiguration:
+    jobmanager.memory.process.size: 768m
+    taskmanager.memory.process.size: 1024m
+    taskmanager.numberOfTaskSlots: "1"
+    state.checkpoints.dir: s3://realrisk-flink/checkpoints
+    state.savepoints.dir: s3://realrisk-flink/savepoints
+    execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+    s3.endpoint: http://realrisk-minio:9000
+    s3.path.style.access: "true"
+  jobManager:
+    resource:
+      memory: "768m"
+      cpu: 0.5
+  taskManager:
+    resource:
+      memory: "1024m"
+      cpu: 0.5
+  podTemplate:
+    apiVersion: v1
+    kind: Pod
+    spec:
+      containers:
+        - name: flink-main-container
+          envFrom:
+            - configMapRef:
+                name: realrisk-flink-config
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: realrisk-minio-credentials
+                  key: accessKey
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: realrisk-minio-credentials
+                  key: secretKey
+            - name: AWS_REGION
+              value: us-east-1
+  job:
+    jarURI: local:///opt/flink/usrlib/realrisk-flink-job-0.1.0-SNAPSHOT.jar
+    parallelism: 2
+    upgradeMode: savepoint
+    state: running

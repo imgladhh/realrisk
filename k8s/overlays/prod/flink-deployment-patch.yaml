@@ -1,0 +1,14 @@
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: realrisk-flink
+spec:
+  image: realrisk-flink:phase5
+  jobManager:
+    resource:
+      memory: "1536m"
+      cpu: 1
+  taskManager:
+    resource:
+      memory: "1536m"
+      cpu: 1

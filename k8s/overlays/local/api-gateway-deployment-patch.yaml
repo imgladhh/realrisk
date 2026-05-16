@@ -1,0 +1,10 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: realrisk-api-gateway
+spec:
+  template:
+    spec:
+      containers:
+        - name: api-gateway
+          image: realrisk-api:phase5

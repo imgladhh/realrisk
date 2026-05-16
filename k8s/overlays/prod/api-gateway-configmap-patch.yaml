@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: realrisk-api-gateway-config
+data:
+  DB_URL: jdbc:postgresql://postgres.platform.svc.cluster.local:5432/realrisk
+  REDIS_HOST: redis.platform.svc.cluster.local
+  KAFKA_BOOTSTRAP_SERVERS: kafka-bootstrap.messaging.svc.cluster.local:9092
+  SCHEMA_REGISTRY_URL: http://schema-registry.messaging.svc.cluster.local:8081

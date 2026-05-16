@@ -42,6 +42,7 @@ realrisk:
     enabled: ${RISK_WORKER_ENABLED:true}
   topics:
     raw-events: raw-events
+    rule-updates: rule-updates
     raw-audit: raw-audit
     decision-audit: decision-audit
     high-risk-events: high-risk-events

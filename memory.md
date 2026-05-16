@@ -65,11 +65,39 @@ Full topology: `docs/architecture-diagram.md`
     - `alert-service` unit tests pass
     - Kafka -> DB integration test exists and auto-skips when Docker is unavailable to the JVM
     - Local smoke test validated:
-      - `alert-e2e-01`
-      - `severity = HIGH`
-      - `status = PROCESSED`
-      - `channels_notified = {email,sms}`
-      - Redis key `alert:ratelimit:user-alert-01:HIGH = 1`
+    - `alert-e2e-01`
+    - `severity = HIGH`
+    - `status = PROCESSED`
+    - `channels_notified = {email,sms}`
+    - Redis key `alert:ratelimit:user-alert-01:HIGH = 1`
+- Phase 5
+  - Added Docker build assets for:
+    - API Gateway
+    - alert-service
+    - Flink job
+  - Added Kustomize structure:
+    - `k8s/base/`
+    - `k8s/overlays/local/`
+    - `k8s/overlays/prod/`
+  - Added local MinIO deployment + PVC + bucket-init Job for Flink checkpoints
+  - Added FlinkDeployment CRD manifest for the Flink K8s Operator
+  - Added helper scripts:
+    - `scripts/build-k8s-images.ps1`
+    - `scripts/kind-load-images.ps1`
+    - `scripts/install-flink-operator.ps1`
+  - Updated Docker Compose Kafka with a K8s-friendly listener:
+    - `host.docker.internal:19092`
+  - Flink SA RBAC: Role + RoleBinding added (pods/services/configmaps, full verbs)
+  - Validation:
+    - `kubectl kustomize k8s/overlays/local` renders successfully
+    - `kubectl kustomize k8s/overlays/prod` renders successfully
+    - kind cluster apply succeeded; Flink Operator + TaskManagers up
+    - MinIO checkpointing real: data visible under `realrisk-flink/checkpoints/`
+    - E2E on K8s:
+      - `evt-k8s-04` -> `BLOCK / 80 / ["large_amount"]` confirmed in `decision-audit`
+      - `evt-k8s-alert-01` -> `BLOCK / 100 / ["blacklisted_user"]`
+      - corresponding `alert_log` row persisted for `user-k8s-alert`
+      - alert severity routed as `CRITICAL` with `{email,sms,push}`
 - Tooling / docs
   - `scripts/run-api.ps1`
   - `scripts/send-rule-update.ps1`
@@ -77,18 +105,19 @@ Full topology: `docs/architecture-diagram.md`
 
 ### In Progress
 
-- No active implementation branch at the moment
-- Main remaining work is review, polish, and deciding whether to add a combined-profile E2E case
+- No active feature phase in progress at the moment
 
 ### Next
 
 1. Add schema registration helper
    - `scripts/register-schemas.ps1`
    - Register all `.avsc` files into local Schema Registry automatically
-2. Phase 5: K8s / Flink operator deployment path
-   - FlinkDeployment CRD
-   - MinIO or S3 checkpoint storage
-   - Operator-based local/prod alignment
+2. Phase 6: Kafka / infra on Kubernetes
+   - likely Strimzi or equivalent
+   - remove the host-network bridge assumptions from the local overlay
+3. Operational polish for Phase 5
+   - document the `rule-updates` topic bootstrap requirement explicitly
+   - decide whether API image should create/ensure `rule-updates` automatically in K8s flows
 
 ---
 
@@ -163,6 +192,10 @@ Full topology: `docs/architecture-diagram.md`
   - `realrisk-schema-registry`
   - `realrisk-redis`
   - `realrisk-postgres`
+- `k8s/`
+  - `base/`
+  - `overlays/local/`
+  - `overlays/prod/`
 
 ---
 
@@ -173,6 +206,10 @@ Full topology: `docs/architecture-diagram.md`
 ```powershell
 docker compose up -d
 ```
+
+For Phase 5 local Kubernetes tests, Docker Compose Kafka now also exposes:
+
+- `host.docker.internal:19092`
 
 ### Build Flink job
 
@@ -203,6 +240,30 @@ docker exec realrisk-redis redis-cli DEL velocity:count:7d:user-phase3
 
 ```powershell
 .\scripts\run-api.ps1 -DisableRiskWorker
+```
+
+### Build Kubernetes images
+
+```powershell
+.\scripts\build-k8s-images.ps1
+```
+
+### Load images into kind
+
+```powershell
+.\scripts\kind-load-images.ps1
+```
+
+### Install the Flink operator
+
+```powershell
+.\scripts\install-flink-operator.ps1
+```
+
+### Render the local Kubernetes overlay
+
+```powershell
+kubectl kustomize .\k8s\overlays\local
 ```
 
 ### Watch `decision-audit`
@@ -328,6 +389,22 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
 - Current channel implementations are logging stubs only
 - DB migrations live in root `src/main/resources/db/migration/`; alert-service pulls them in via pom.xml resource include
 
+### Phase 5 Kubernetes layout
+
+- Kafka, Schema Registry, Redis, and PostgreSQL remain on Docker Compose in this phase
+- Kubernetes workloads bridge back to those host services through:
+  - Kafka: `host.docker.internal:19092`
+  - Schema Registry: `http://host.docker.internal:8081`
+  - Redis: `host.docker.internal:6379`
+  - PostgreSQL: `host.docker.internal:55432`
+- Flink checkpoints and savepoints are configured for:
+  - `s3://realrisk-flink/checkpoints`
+  - `s3://realrisk-flink/savepoints`
+- Local MinIO provides the S3-compatible backend inside the cluster
+- `kind` + `helm` local validation has been completed on this machine
+- Compose Kafka must expose `host.docker.internal:19092` and may need a force-recreate after listener changes
+- The `rule-updates` topic must exist before the K8s Flink job can stay healthy; after Kafka recreation it may need to be re-created
+
 ### Decision idempotency
 
 - `decisionId` is deterministic from `eventId`
@@ -350,6 +427,8 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
   this environment because the JVM cannot see a valid Docker socket
 - `alert-service` now has explicit consumer retry/backoff, but still has no dead-letter topic
   - acceptable for Phase 4, but should be tightened before K8s / production rollout
+- `alert-service` packaging can fail if `alert-service-0.1.0-SNAPSHOT.jar` is locked by a running
+  local process; stop the running jar before rebuilding the image layer
 
 ---
 

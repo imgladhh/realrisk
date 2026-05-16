@@ -6,6 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record RiskProperties(Topics topics, RateLimit rateLimit) {
   public record Topics(
       String rawEvents,
+      String ruleUpdates,
       String rawAudit,
       String decisionAudit,
       String highRiskEvents,

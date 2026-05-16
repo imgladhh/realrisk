@@ -1,0 +1,31 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: realrisk-minio-bucket-init
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: realrisk-minio-credentials
+                  key: accessKey
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: realrisk-minio-credentials
+                  key: secretKey
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until mc alias set local http://realrisk-minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                echo "waiting for minio..."
+                sleep 2
+              done
+              mc mb --ignore-existing local/realrisk-flink

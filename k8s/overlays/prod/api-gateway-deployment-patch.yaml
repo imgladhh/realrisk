@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: realrisk-api-gateway
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: api-gateway
+          resources:
+            requests:
+              cpu: 500m
+              memory: 768Mi
+            limits:
+              cpu: "2"
+              memory: 1536Mi

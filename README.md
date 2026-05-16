@@ -385,6 +385,129 @@ alert:ratelimit:user-alert-01:HIGH = 1
 
 ---
 
+## Phase 5: Kubernetes Deployment Scaffold
+
+Phase 5 adds a Kubernetes-first deployment layout while intentionally keeping
+Kafka, Schema Registry, Redis, and PostgreSQL on Docker Compose for now.
+
+### What is included
+
+- `Dockerfile.api-gateway`
+- `alert-service/Dockerfile`
+- `flink-job/Dockerfile`
+- `k8s/base/`
+  - `api-gateway/` Deployment + Service + ConfigMap
+  - `alert-service/` Deployment + Service + ConfigMap
+  - `flink/` FlinkDeployment CRD + ServiceAccount + ConfigMap
+  - `minio/` Deployment + Service + PVC + bucket-init Job
+- `k8s/overlays/local/`
+  - local namespace
+  - dev Secrets
+  - host-based overrides for Compose-backed infra
+- `k8s/overlays/prod/`
+  - resource and endpoint placeholders for a production-like layout
+- helper scripts:
+  - `scripts/build-k8s-images.ps1`
+  - `scripts/kind-load-images.ps1`
+  - `scripts/install-flink-operator.ps1`
+
+### Important local networking note
+
+Kubernetes pods cannot use the plain `localhost:9092` Kafka listener from the
+host. `docker-compose.yml` now exposes an extra broker listener for local
+cluster workloads:
+
+- Kafka for Kubernetes pods: `host.docker.internal:19092`
+
+The local overlay is already wired to use:
+
+- Kafka: `host.docker.internal:19092`
+- Schema Registry: `http://host.docker.internal:8081`
+- Redis: `host.docker.internal:6379`
+- PostgreSQL: `host.docker.internal:55432`
+
+### Build images for Kubernetes
+
+```powershell
+.\scripts\build-k8s-images.ps1
+```
+
+Default image tags:
+
+- `realrisk-api:phase5`
+- `realrisk-alert-service:phase5`
+- `realrisk-flink:phase5`
+
+### Load images into kind
+
+```powershell
+.\scripts\kind-load-images.ps1
+```
+
+### Install the Flink Kubernetes Operator
+
+```powershell
+.\scripts\install-flink-operator.ps1
+```
+
+This uses the official Helm chart and disables the webhook for a lighter-weight
+local install.
+
+### Render or apply the local overlay
+
+Render:
+
+```powershell
+kubectl kustomize .\k8s\overlays\local
+```
+
+Apply:
+
+```powershell
+kubectl apply -k .\k8s\overlays\local
+```
+
+### Access the Flink JobManager UI
+
+After the `FlinkDeployment` is running, port-forward the operator-created REST
+service:
+
+```powershell
+kubectl -n realrisk port-forward svc/realrisk-flink-rest 8082:8081
+```
+
+Then open [http://localhost:8082](http://localhost:8082).
+
+### Current validation level
+
+Phase 5 has now been validated on a local `kind` cluster:
+
+- `kubectl kustomize .\k8s\overlays\local` renders successfully
+- `kubectl kustomize .\k8s\overlays\prod` renders successfully
+- Flink K8s Operator installed successfully through Helm
+- local images were built and loaded into `kind`
+- `kubectl apply -k .\k8s\overlays\local` brought up:
+  - `realrisk-api-gateway`
+  - `realrisk-alert-service`
+  - `realrisk-minio`
+  - `realrisk-flink` plus TaskManagers
+- Flink checkpoints were written to MinIO under:
+  - `realrisk-flink/checkpoints/...`
+- K8s Flink E2E validated:
+  - `evt-k8s-04` -> `BLOCK / 80 / ["large_amount"]`
+- K8s alert path validated:
+  - `evt-k8s-alert-01` -> `BLOCK / 100 / ["blacklisted_user"]`
+  - corresponding `alert_log` row persisted with:
+    - `user_id = user-k8s-alert`
+    - `severity = CRITICAL`
+    - `status = PROCESSED`
+    - `channels_notified = {email,sms,push}`
+
+The remaining Phase 5 follow-up is documentation and operational polish rather
+than basic functionality.
+
+---
+
 ## Ingest Example
 
 ```powershell

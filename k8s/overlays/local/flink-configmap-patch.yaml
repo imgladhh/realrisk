@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: realrisk-flink-config
+data:
+  REDIS_HOST: host.docker.internal
+  KAFKA_BOOTSTRAP_SERVERS: host.docker.internal:19092
+  SCHEMA_REGISTRY_URL: http://host.docker.internal:8081

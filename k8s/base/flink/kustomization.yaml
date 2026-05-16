@@ -1,0 +1,6 @@
+resources:
+  - configmap.yaml
+  - serviceaccount.yaml
+  - role.yaml
+  - rolebinding.yaml
+  - flink-deployment.yaml
