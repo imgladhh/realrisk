@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: realrisk-grafana-dashboard
+  labels:
+    grafana_dashboard: "1"
+data:
+  realrisk-overview.json: |
+    {
+      "annotations": {
+        "list": []
+      },
+      "editable": true,
+      "graphTooltip": 0,
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "Flink Event Throughput",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(flink_taskmanager_job_task_operator_numRecordsInPerSecond{namespace=\"realrisk\"})",
+              "legendFormat": "records in / s"
+            }
+          ]
+        },
+        {
+          "type": "piechart",
+          "title": "Decision Distribution (1h)",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(max_over_time(flink_taskmanager_job_task_operator_realrisk_decision_allow{namespace=\"realrisk\"}[1h]))",
+              "legendFormat": "ALLOW"
+            },
+            {
+              "expr": "sum(max_over_time(flink_taskmanager_job_task_operator_realrisk_decision_review{namespace=\"realrisk\"}[1h]))",
+              "legendFormat": "REVIEW"
+            },
+            {
+              "expr": "sum(max_over_time(flink_taskmanager_job_task_operator_realrisk_decision_block{namespace=\"realrisk\"}[1h]))",
+              "legendFormat": "BLOCK"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Checkpoint Duration",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "targets": [
+            {
+              "expr": "max(flink_jobmanager_job_lastCheckpointDuration{namespace=\"realrisk\"})",
+              "legendFormat": "duration"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Checkpoint Size",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [
+            {
+              "expr": "max(flink_jobmanager_job_lastCheckpointSize{namespace=\"realrisk\"})",
+              "legendFormat": "size"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Alert Processing Rate by Severity",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "targets": [
+            {
+              "expr": "sum(rate(alert_processed_total{namespace=\"realrisk\",status=\"PROCESSED\"}[5m])) by (severity)",
+              "legendFormat": "{{severity}}"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "API Gateway P99 Latency",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+          "targets": [
+            {
+              "expr": "http_server_requests_seconds_max{application=\"realrisk\",uri=\"/events\",method=\"POST\"}",
+              "legendFormat": "max latency /events"
+            }
+          ]
+        }
+      ],
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": ["realrisk"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "timezone": "browser",
+      "title": "RealRisk Overview",
+      "version": 1
+    }

@@ -1,0 +1,58 @@
+---
+name: realrisk-k8s-validation
+description: Use when working on RealRisk Kubernetes validation, Kafka/Flink/Schema Registry troubleshooting, or Phase 5/6 end-to-end checks. Covers the project-specific in-cluster produce/consume workflow, Flink restart expectations, PostgreSQL/Redis access patterns, and known local Windows plus kubectl exec pitfalls.
+---
+
+# RealRisk K8s Validation
+
+Use this skill for RealRisk tasks that involve:
+
+- validating Phase 5 or Phase 6 flows
+- checking whether a message made it from `raw-events` to `decision-audit` or `alert_log`
+- restarting Flink after Kafka or ConfigMap changes
+- producing or consuming Avro messages in the Kubernetes-only path
+- debugging local kind + Strimzi + Schema Registry behavior on this repo
+
+## Default workflow
+
+1. Confirm the target path first:
+   - Phase 5 uses hybrid infra (`host.docker.internal`, Compose-backed Kafka and DB)
+   - Phase 6 uses Kubernetes-only infra (`realrisk-kafka-kafka-bootstrap:9092`, in-cluster SR/Redis/Postgres)
+2. For Phase 6, always prefer commands run **inside the Kubernetes Schema Registry pod**.
+3. Before blaming Kafka or Schema Registry, verify whether the event exists in:
+   - `raw-events`
+   - then `decision-audit`
+   - then `alert-events` / `alert_log`
+4. After Kafka bootstrap or ConfigMap changes, restart or recycle the Flink job pod and wait for:
+   - `raw-events-source` running
+   - `rule-updates-source` running
+   - checkpoints completing
+
+## Project-specific rules
+
+- Prefer one-shot `kubectl exec ... sh -c "<command>"` or short-lived `bash` sessions over long-lived `kubectl exec -it ... kafka-avro-console-consumer` sessions.
+- On this machine, long-lived `kubectl exec` console-consumer sessions can die with exit code `137`; treat that as a tooling nuisance, not immediate evidence of a Kafka failure.
+- On Windows PowerShell, avoid embedding `$(cat /tmp/file)` in outer PowerShell strings unless you are sure PowerShell will not evaluate it locally.
+- On Windows PowerShell, prefer the real HTTP ingress path (`Invoke-RestMethod` to a port-forwarded service) over hand-built Avro producer commands when either path is acceptable.
+- After any `kubectl rollout restart` or image rebuild that replaces pods, assume existing `kubectl port-forward` sessions are stale even if the terminal does not obviously fail. Re-resolve the pod name and re-run `port-forward`.
+- When a metric seems "missing", verify it at the pod first with a pod-level port-forward to `/actuator/prometheus` or `/metrics` before blaming Prometheus or Grafana.
+- For Phase 6 validation, do **not** use the old Docker Compose `realrisk-schema-registry` container to inspect topics that now live in Kubernetes.
+
+## Pod and service lookup
+
+When commands need the current pod names, resolve them dynamically first:
+
+```powershell
+kubectl get pods -n realrisk | findstr schema-registry
+kubectl get pods -n realrisk | findstr realrisk-flink-
+kubectl get pods -n realrisk | findstr redis
+kubectl get pods -n realrisk | findstr postgresql
+```
+
+## Validation patterns
+
+- For current end-to-end commands and troubleshooting checkpoints, read [references/phase-validation.md](references/phase-validation.md).
+- For observability checks, use this order:
+  1. confirm the application pod exposes the expected metric locally
+  2. confirm Prometheus can query the metric
+  3. confirm Grafana panel logic and labels match the actual metric name

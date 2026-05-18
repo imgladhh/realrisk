@@ -36,6 +36,12 @@ management:
     health:
       probes:
         enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles:
+        "[http.server.requests]": 0.5, 0.95, 0.99
 
 realrisk:
   risk-worker:

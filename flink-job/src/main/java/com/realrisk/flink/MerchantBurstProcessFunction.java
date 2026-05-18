@@ -41,6 +41,7 @@ public class MerchantBurstProcessFunction
   private transient RedisClient redisClient;
   private transient StatefulRedisConnection<String, String> redisConnection;
   private transient RedisUserProfileReader userProfileReader;
+  private transient DecisionMetrics decisionMetrics;
 
   public MerchantBurstProcessFunction(FlinkRiskJobConfig config) {
     this.config = config;
@@ -66,6 +67,8 @@ public class MerchantBurstProcessFunction
       userProfileReader = new RedisUserProfileReader(null);
       closeRedisResources();
     }
+
+    decisionMetrics = new DecisionMetrics(getRuntimeContext().getMetricGroup());
   }
 
   @Override
@@ -89,6 +92,7 @@ public class MerchantBurstProcessFunction
             .evaluate(
                 event, userProfile, distinctUsersInWindow(), Instant.ofEpochMilli(eventTimestamp));
 
+    decisionMetrics.recordDecision(evaluation.decision());
     out.collect(FlinkRiskMappers.toDecisionAvro(evaluation));
     if (evaluation.riskScore() >= config.highRiskThreshold()) {
       ctx.output(HIGH_RISK_OUTPUT_TAG, FlinkRiskMappers.toHighRiskEvent(evaluation));

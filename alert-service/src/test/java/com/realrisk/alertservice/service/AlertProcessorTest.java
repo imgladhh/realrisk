@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.realrisk.alertservice.model.AlertEvent;
+import com.realrisk.alertservice.metrics.AlertMetrics;
 import com.realrisk.alertservice.notify.NotificationChannel;
 import com.realrisk.alertservice.notify.NotificationRouter;
 import com.realrisk.alertservice.persistence.AlertLogRepository;
@@ -26,6 +27,7 @@ class AlertProcessorTest {
     AlertLogRepository repository = Mockito.mock(AlertLogRepository.class);
     AlertRateLimiter rateLimiter = Mockito.mock(AlertRateLimiter.class);
     NotificationRouter router = Mockito.mock(NotificationRouter.class);
+    AlertMetrics metrics = Mockito.mock(AlertMetrics.class);
     NotificationChannel email = Mockito.mock(NotificationChannel.class);
     NotificationChannel sms = Mockito.mock(NotificationChannel.class);
     when(repository.insertIfAbsent(any())).thenReturn(true);
@@ -34,7 +36,7 @@ class AlertProcessorTest {
     when(email.name()).thenReturn("email");
     when(sms.name()).thenReturn("sms");
 
-    AlertProcessor processor = new AlertProcessor(repository, rateLimiter, router, fixedClock());
+    AlertProcessor processor = new AlertProcessor(repository, rateLimiter, router, metrics, fixedClock());
     var result = processor.process(event());
 
     assertThat(result.duplicate()).isFalse();
@@ -55,6 +57,7 @@ class AlertProcessorTest {
     AlertLogRepository repository = Mockito.mock(AlertLogRepository.class);
     AlertRateLimiter rateLimiter = Mockito.mock(AlertRateLimiter.class);
     NotificationRouter router = Mockito.mock(NotificationRouter.class);
+    AlertMetrics metrics = Mockito.mock(AlertMetrics.class);
     when(repository.insertIfAbsent(any())).thenReturn(false);
     when(repository.findByAlertId("alert-1"))
         .thenReturn(
@@ -69,7 +72,7 @@ class AlertProcessorTest {
                     Instant.parse("2026-05-16T15:59:00Z"),
                     Instant.parse("2026-05-16T16:00:00Z"))));
 
-    AlertProcessor processor = new AlertProcessor(repository, rateLimiter, router, fixedClock());
+    AlertProcessor processor = new AlertProcessor(repository, rateLimiter, router, metrics, fixedClock());
     var result = processor.process(event());
 
     assertThat(result.duplicate()).isTrue();
@@ -83,10 +86,11 @@ class AlertProcessorTest {
     AlertLogRepository repository = Mockito.mock(AlertLogRepository.class);
     AlertRateLimiter rateLimiter = Mockito.mock(AlertRateLimiter.class);
     NotificationRouter router = Mockito.mock(NotificationRouter.class);
+    AlertMetrics metrics = Mockito.mock(AlertMetrics.class);
     when(repository.insertIfAbsent(any())).thenReturn(true);
     when(rateLimiter.allow(any())).thenReturn(false);
 
-    AlertProcessor processor = new AlertProcessor(repository, rateLimiter, router, fixedClock());
+    AlertProcessor processor = new AlertProcessor(repository, rateLimiter, router, metrics, fixedClock());
     var result = processor.process(event());
 
     assertThat(result.rateLimited()).isTrue();
@@ -105,6 +109,7 @@ class AlertProcessorTest {
     AlertLogRepository repository = Mockito.mock(AlertLogRepository.class);
     AlertRateLimiter rateLimiter = Mockito.mock(AlertRateLimiter.class);
     NotificationRouter router = Mockito.mock(NotificationRouter.class);
+    AlertMetrics metrics = Mockito.mock(AlertMetrics.class);
     NotificationChannel email = Mockito.mock(NotificationChannel.class);
     when(repository.insertIfAbsent(any())).thenReturn(false);
     when(repository.findByAlertId("alert-1"))
@@ -123,7 +128,7 @@ class AlertProcessorTest {
     when(router.route(any())).thenReturn(List.of(email));
     when(email.name()).thenReturn("email");
 
-    AlertProcessor processor = new AlertProcessor(repository, rateLimiter, router, fixedClock());
+    AlertProcessor processor = new AlertProcessor(repository, rateLimiter, router, metrics, fixedClock());
     var result = processor.process(event());
 
     assertThat(result.duplicate()).isFalse();

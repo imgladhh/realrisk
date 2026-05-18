@@ -1,12 +1,14 @@
 package com.realrisk.api;
 
 import com.realrisk.kafka.RiskEventPublisher;
+import com.realrisk.metrics.ApiGatewayMetrics;
 import com.realrisk.model.IngestRequest;
 import com.realrisk.model.IngestResponse;
 import com.realrisk.model.RateLimitResult;
 import com.realrisk.model.RiskEvent;
 import com.realrisk.redis.BlacklistService;
 import com.realrisk.redis.RateLimitService;
+import io.micrometer.core.instrument.Timer;
 import jakarta.validation.Valid;
 import java.time.Instant;
 import java.util.Locale;
@@ -33,14 +35,17 @@ public class IngestController {
   private final BlacklistService blacklistService;
   private final RateLimitService rateLimitService;
   private final RiskEventPublisher publisher;
+  private final ApiGatewayMetrics metrics;
 
   public IngestController(
       BlacklistService blacklistService,
       RateLimitService rateLimitService,
-      RiskEventPublisher publisher) {
+      RiskEventPublisher publisher,
+      ApiGatewayMetrics metrics) {
     this.blacklistService = blacklistService;
     this.rateLimitService = rateLimitService;
     this.publisher = publisher;
+    this.metrics = metrics;
   }
 
   @PostMapping
@@ -54,8 +59,12 @@ public class IngestController {
     String requestId = valueOrUuid(request.requestId());
 
     try {
+      Timer.Sample blacklistSample = metrics.startSample();
       var blacklist = blacklistService.find(request.userId());
+      metrics.recordBlacklistLookup(blacklistSample);
       if (blacklist.isPresent()) {
+        metrics.incrementBlacklistHit();
+        metrics.incrementIngressOutcome("BLOCK");
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
             .body(
                 new IngestResponse(
@@ -66,13 +75,18 @@ public class IngestController {
                     0));
       }
 
+      Timer.Sample rateLimitSample = metrics.startSample();
       RateLimitResult rateLimit = rateLimitService.check(request.userId(), requestId);
+      metrics.recordRateLimitCheck(rateLimitSample);
       if (rateLimit.blocked()) {
+        metrics.incrementRateLimitHit();
+        metrics.incrementIngressOutcome("BLOCK");
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
             .body(new IngestResponse(eventId, requestId, "BLOCKED", "rate_limit", rateLimit.count()));
       }
 
       publisher.publishRawEvent(toEvent(request, eventId, requestId, eventType));
+      metrics.incrementIngressOutcome("ALLOW");
       return ResponseEntity.accepted()
           .body(
               new IngestResponse(

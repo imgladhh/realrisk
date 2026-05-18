@@ -4,3 +4,4 @@ resources:
   - role.yaml
   - rolebinding.yaml
   - flink-deployment.yaml
+  - pod-monitor.yaml

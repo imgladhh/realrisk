@@ -12,6 +12,8 @@ spec:
     jobmanager.memory.process.size: 768m
     taskmanager.memory.process.size: 1024m
     taskmanager.numberOfTaskSlots: "1"
+    metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+    metrics.reporter.prom.port: "9249"
     state.checkpoints.dir: s3://realrisk-flink/checkpoints
     state.savepoints.dir: s3://realrisk-flink/savepoints
     execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
@@ -31,6 +33,9 @@ spec:
     spec:
       containers:
         - name: flink-main-container
+          ports:
+            - name: prom
+              containerPort: 9249
           envFrom:
             - configMapRef:
                 name: realrisk-flink-config

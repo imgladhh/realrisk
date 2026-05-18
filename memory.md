@@ -125,41 +125,40 @@ Full topology: `docs/architecture-diagram.md`
       - `status = PROCESSED`
       - `channels_notified = {email,sms,push}`
       - `reason_summary = blacklisted_user`
+- Phase 7
+  - Micrometer business counters/timers added for API Gateway and Alert Service
+  - Alert Service exposes approximate Kafka consumer lag gauge via `AdminClient`
+  - Flink custom `DecisionMetrics` using flat counter names (`decision_allow/review/block`) via untagged groups
+  - Flink Prometheus Reporter enabled in `FlinkDeployment` (`port: 9249`)
+  - `ServiceMonitor` for api-gateway and alert-service; `PodMonitor` for Flink TM + JM
+  - `scripts/install-monitoring.ps1` installs `kube-prometheus-stack` (chart pinned at 65.1.0)
+  - Grafana dashboard ConfigMap with 6 panels under `k8s/base/monitoring/`
+  - `management.metrics.tags.application` and `percentiles` configured in `application.yml`
+  - API Gateway Latency panel uses `http_server_requests_seconds_max` (P99 histogram not supported by Spring Boot 3.3.x observation timer via YAML config)
+  - Validation:
+    - All 6 Grafana panels showing live data
+    - Decision Distribution: ALLOW / REVIEW / BLOCK visible in piechart
+    - Checkpoint Duration and Size: live data from JobManager PodMonitor
+    - Alert Processing Rate: CRITICAL confirmed after velocity + large_amount forcing
+    - API Gateway Latency: `http_server_requests_seconds_max{uri="/events"}` live
 - Tooling / docs
   - `scripts/run-api.ps1`
   - `scripts/send-rule-update.ps1`
+  - `scripts/register-schemas.ps1` - registers all 5 Avro schemas into SR under the correct topic subjects
+  - `scripts/install-monitoring.ps1` - installs kube-prometheus-stack into `monitoring` namespace
   - README updated with Phase 2c and E2E walkthrough
 
 ### In Progress
 
-- `scripts/register-schemas.ps1` still not implemented
-- Current Phase 6 validation found a Strimzi startup compatibility issue on Kubernetes 1.35:
-  - older operator startup can fail while parsing Kubernetes `VersionInfo`
-  - `install-infra.ps1` now pins Strimzi `0.45.2` and sets `STRIMZI_KUBERNETES_VERSION`
-    dynamically from `kubectl version`
-- Strimzi in `strimzi-system` must watch the `realrisk` namespace; `install-infra.ps1`
-  now enables `watchAnyNamespace=true` so the operator reconciles `Kafka` / `KafkaTopic`
-  CRs created outside its own namespace
-- Phase 6 local validation hit a single-node ZooKeeper runtime failure
-  (`Leader.getDesignatedLeader -> NoSuchElementException`) even after Strimzi
-  reconciliation issues were fixed
-- Local Kafka manifests now switch to Strimzi KRaft mode with a single dual-role
-  `KafkaNodePool` instead of ZooKeeper
-- Phase 6 local validation also exposed a few recurring operational gotchas:
-  - Strimzi operator in `strimzi-system` must watch `realrisk`
-  - Schema Registry bootstrap must be plain `host:port`, not `PLAINTEXT://...`
-  - after Kafka path changes, Flink should be restarted so pods consume the new ConfigMap
-  - Phase 6 verification commands should run inside the Kubernetes Schema Registry pod,
-    not the old Docker Compose container
+- No active implementation work in progress
 
 ### Next
 
-1. Add schema registration helper
-   - `scripts/register-schemas.ps1`
-   - Register all `.avsc` files into local Schema Registry automatically
-2. Phase 7 candidate
+1. Phase 8 candidates
    - CloudNativePG or equivalent production-grade PostgreSQL operator
    - stronger production HA separation for Redis/PostgreSQL
+   - GitHub Actions CI/CD pipeline
+   - AlertManager routing rules (email/Slack)
 
 ---
 
@@ -209,6 +208,13 @@ Full topology: `docs/architecture-diagram.md`
   - Starts Spring API with repo-local Maven and local infra defaults
 - `send-rule-update.ps1`
   - Sends a `RuleUpdateAvro` message through the schema-registry container
+- `register-schemas.ps1`
+  - Registers all `.avsc` files into Schema Registry under the correct topic subjects
+  - Idempotent: safe to re-run; returns existing id for unchanged schemas
+  - `-SchemaRegistryUrl` defaults to `http://localhost:8081`
+- `install-monitoring.ps1`
+  - Installs `kube-prometheus-stack` into the `monitoring` namespace
+  - Applies the RealRisk Grafana dashboard ConfigMap after the Helm install
 
 ### Alert Service
 
@@ -473,6 +479,8 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
   local process; stop the running jar before rebuilding the image layer
 - Long-lived `kubectl exec -it ... kafka-avro-console-consumer` sessions can exit with `137`
   during local validation; prefer one-shot produce/consume checks when debugging Phase 6
+- For Phase 7 local monitoring bring-up, run `scripts/install-monitoring.ps1` before
+  `kubectl apply -k .\k8s\overlays\local` so the ServiceMonitor and PodMonitor CRDs exist
 
 ---
 

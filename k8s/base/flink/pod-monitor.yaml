@@ -1,0 +1,37 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: realrisk-flink-taskmanager
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: realrisk-flink
+      component: taskmanager
+  namespaceSelector:
+    matchNames:
+      - realrisk
+  podMetricsEndpoints:
+    - port: prom
+      path: /metrics
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: realrisk-flink-jobmanager
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: realrisk-flink
+      component: jobmanager
+  namespaceSelector:
+    matchNames:
+      - realrisk
+  podMetricsEndpoints:
+    - port: prom
+      path: /metrics
+      interval: 15s

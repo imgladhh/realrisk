@@ -1,0 +1,21 @@
+prometheus:
+  prometheusSpec:
+    retention: 6h
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorNamespaceSelector: {}
+    podMonitorNamespaceSelector: {}
+    storageSpec: null
+
+grafana:
+  adminPassword: realrisk
+  persistence:
+    enabled: false
+  sidecar:
+    dashboards:
+      searchNamespace: ALL
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    storage: {}
