@@ -38,10 +38,11 @@ management:
 realrisk:
   alert:
     topic: ${ALERT_EVENTS_TOPIC:alert-events}
+    dlq-topic: ${ALERT_DLQ_TOPIC:alert-events-dlq}
     consumer-group: ${ALERT_CONSUMER_GROUP:alert-service}
     rate-limit-window: ${ALERT_RATE_LIMIT_WINDOW:15m}
-    consumer-retry-backoff: ${ALERT_CONSUMER_RETRY_BACKOFF:1s}
-    consumer-retry-attempts: ${ALERT_CONSUMER_RETRY_ATTEMPTS:2}
+    retry-backoff: ${ALERT_RETRY_BACKOFF_MS:1000}ms
+    max-retries: ${ALERT_MAX_RETRIES:2}
     routing:
       MEDIUM: [email]
       HIGH: [email, sms]

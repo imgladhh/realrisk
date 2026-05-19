@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: realrisk-flink-checkpoints
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: realrisk.flink
+      rules:
+        - alert: FlinkCheckpointFailures
+          expr: increase(flink_jobmanager_job_numberOfFailedCheckpoints{namespace="realrisk"}[10m]) > 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: Flink checkpoints are failing
+            description: The Flink jobmanager has recorded failed checkpoints in the last 10 minutes.

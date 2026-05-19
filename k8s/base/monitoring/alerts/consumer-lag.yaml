@@ -1,0 +1,26 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: realrisk-alert-service-consumer-lag
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: realrisk.alert-service
+      rules:
+        - alert: AlertServiceConsumerLagHigh
+          expr: max(alert_consumer_lag{namespace="realrisk"}) > 10
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Alert service consumer lag is elevated
+            description: alert-service lag has stayed above 10 messages for more than 5 minutes.
+        - alert: AlertServiceDown
+          expr: absent(alert_consumer_lag{namespace="realrisk"})
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: Alert service metrics disappeared
+            description: alert_consumer_lag has been absent for more than 2 minutes; alert-service may be down.

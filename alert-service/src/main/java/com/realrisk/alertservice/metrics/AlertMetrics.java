@@ -25,6 +25,10 @@ public class AlertMetrics {
     meterRegistry.counter("alert.ratelimit.hit", "severity", severity).increment();
   }
 
+  public void incrementDlqPublished(String severity) {
+    meterRegistry.counter("alert.dlq.published", "severity", severity).increment();
+  }
+
   public void setConsumerLag(long lag) {
     consumerLag.set(Math.max(lag, 0));
   }

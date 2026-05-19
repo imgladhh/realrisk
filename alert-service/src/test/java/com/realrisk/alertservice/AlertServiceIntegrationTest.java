@@ -4,15 +4,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.realrisk.avro.AlertEventAvro;
 import io.confluent.kafka.serializers.KafkaAvroSerializer;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.UUID;
+import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -55,6 +62,8 @@ class AlertServiceIntegrationTest {
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("spring.data.redis.host", REDIS::getHost);
     registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
+    registry.add("realrisk.alert.max-retries", () -> 0L);
+    registry.add("realrisk.alert.retry-backoff", () -> "10ms");
   }
 
   @Test
@@ -102,6 +111,23 @@ class AlertServiceIntegrationTest {
     throw new AssertionError("Timed out waiting for alert_log row");
   }
 
+  @Test
+  void malformedAlertPayloadIsPublishedToDlq() throws Exception {
+    byte[] malformed = "malformed-alert".getBytes(StandardCharsets.UTF_8);
+    try (KafkaProducer<String, byte[]> producer = rawProducer()) {
+      producer.send(new ProducerRecord<>("alert-events", "user-dlq-1", malformed)).get();
+    }
+
+    try (Consumer<byte[], byte[]> consumer = dlqConsumer()) {
+      consumer.subscribe(List.of("alert-events-dlq"));
+      ConsumerRecord<byte[], byte[]> record = awaitRecord(consumer);
+      assertThat(record.value()).isEqualTo(malformed);
+      assertThat(headerValue(record, "x-original-topic")).isEqualTo("alert-events");
+      assertThat(headerValue(record, "x-failed-at")).isNotBlank();
+      assertThat(headerValue(record, "x-retry-count")).isEqualTo("1");
+    }
+  }
+
   private KafkaProducer<String, AlertEventAvro> producer() {
     Properties props = new Properties();
     props.put("bootstrap.servers", KAFKA.getBootstrapServers());
@@ -110,5 +136,40 @@ class AlertServiceIntegrationTest {
     props.put("schema.registry.url", "mock://alert-service-it");
     props.put("rule.service.loader.enable", "false");
     return new KafkaProducer<>(props);
+  }
+
+  private KafkaProducer<String, byte[]> rawProducer() {
+    Properties props = new Properties();
+    props.put("bootstrap.servers", KAFKA.getBootstrapServers());
+    props.put("key.serializer", StringSerializer.class.getName());
+    props.put("value.serializer", org.apache.kafka.common.serialization.ByteArraySerializer.class.getName());
+    return new KafkaProducer<>(props);
+  }
+
+  private Consumer<byte[], byte[]> dlqConsumer() {
+    Properties props = new Properties();
+    props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
+    props.put(ConsumerConfig.GROUP_ID_CONFIG, "alert-dlq-it-" + UUID.randomUUID());
+    props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+    props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+    props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+    return new KafkaConsumer<>(props);
+  }
+
+  private ConsumerRecord<byte[], byte[]> awaitRecord(Consumer<byte[], byte[]> consumer)
+      throws InterruptedException {
+    long deadline = System.currentTimeMillis() + 15_000L;
+    while (System.currentTimeMillis() < deadline) {
+      ConsumerRecords<byte[], byte[]> records = consumer.poll(Duration.ofMillis(250));
+      if (!records.isEmpty()) {
+        return records.iterator().next();
+      }
+      Thread.sleep(100L);
+    }
+    throw new AssertionError("Timed out waiting for DLQ record");
+  }
+
+  private String headerValue(ConsumerRecord<byte[], byte[]> record, String key) {
+    return new String(record.headers().lastHeader(key).value(), StandardCharsets.UTF_8);
   }
 }

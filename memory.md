@@ -2,7 +2,7 @@
 
 > Living context for AI-assisted development sessions.
 > Update `Done`, `In Progress`, `Next`, and `Known Issues` at the end of each session.
-> Last updated: 2026-05-16
+> Last updated: 2026-05-18
 
 ---
 
@@ -141,6 +141,30 @@ Full topology: `docs/architecture-diagram.md`
     - Checkpoint Duration and Size: live data from JobManager PodMonitor
     - Alert Processing Rate: CRITICAL confirmed after velocity + large_amount forcing
     - API Gateway Latency: `http_server_requests_seconds_max{uri="/events"}` live
+- Phase 8
+  - Added GitHub Actions workflow under `.github/workflows/ci.yaml`
+    - combined `build-and-push` job with Maven packaging before Docker builds
+    - deploy step injects SHA-tagged images into the overlay before a single `kubectl apply`
+  - Added `alert-events-dlq` Kafka topic CRD with 7-day retention
+  - `alert-service` now consumes raw Kafka bytes, decodes Avro in-process, and forwards exhausted failures to DLQ
+  - DLQ publisher adds headers:
+    - `x-exception-message`
+    - `x-retry-count`
+    - `x-original-topic`
+    - `x-failed-at`
+  - Added `alert.dlq.published` Micrometer counter
+  - Added PrometheusRule alerts:
+    - `AlertServiceConsumerLagHigh`
+    - `AlertServiceDown`
+    - `FlinkCheckpointFailures`
+    - `ApiGatewayHighErrorRate`
+  - `install-monitoring.ps1` now creates placeholder Alertmanager receiver secrets directly in the `monitoring` namespace
+  - Validation:
+    - malformed payload published to `alert-events` was forwarded to `alert-events-dlq`
+    - DLQ record verified with required headers and original payload
+    - `alert_dlq_published_total{severity="unknown"} 1.0` confirmed in `alert-service` actuator metrics
+    - `AlertServiceDown` fired after scaling `alert-service` to `0`
+    - `alert_consumer_lag{namespace="realrisk"}` returned after scaling `alert-service` back to `1`
 - Tooling / docs
   - `scripts/run-api.ps1`
   - `scripts/send-rule-update.ps1`
@@ -155,10 +179,12 @@ Full topology: `docs/architecture-diagram.md`
 ### Next
 
 1. Phase 8 candidates
+   - GitHub Actions runner-side acceptance (PR test / main push / GHCR push / deploy)
+   - AlertManager receiver delivery validation with real SMTP / Slack secrets
+2. Phase 9 candidates
    - CloudNativePG or equivalent production-grade PostgreSQL operator
    - stronger production HA separation for Redis/PostgreSQL
-   - GitHub Actions CI/CD pipeline
-   - AlertManager routing rules (email/Slack)
+   - broker-side Kafka lag exporter to replace consumer-owned lag metrics
 
 ---
 
@@ -214,6 +240,7 @@ Full topology: `docs/architecture-diagram.md`
   - `-SchemaRegistryUrl` defaults to `http://localhost:8081`
 - `install-monitoring.ps1`
   - Installs `kube-prometheus-stack` into the `monitoring` namespace
+  - Creates placeholder `realrisk-alertmanager-secrets` in `monitoring`
   - Applies the RealRisk Grafana dashboard ConfigMap after the Helm install
 
 ### Alert Service
@@ -434,6 +461,10 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
   - PENDING rows are retried on redelivery instead of being skipped as duplicates
 - Redis key format for rate limiting: `alert:ratelimit:<userId>:<severity>`
 - Consumer error handling: `DefaultErrorHandler` + `FixedBackOff(1s, 2 attempts)`
+- DLQ behavior:
+  - topic name defaults to `alert-events-dlq`
+  - exhausted failures are published as raw bytes with failure headers
+  - `ALERT_MAX_RETRIES` and `ALERT_RETRY_BACKOFF_MS` are config-driven
 - Current channel implementations are logging stubs only
 - DB migrations live in root `src/main/resources/db/migration/`; alert-service pulls them in via pom.xml resource include
 
@@ -473,14 +504,15 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
   not necessarily a consumer bug
 - `alert-service` integration test is written with Testcontainers but currently auto-skips in
   this environment because the JVM cannot see a valid Docker socket
-- `alert-service` now has explicit consumer retry/backoff, but still has no dead-letter topic
-  - acceptable for Phase 4, but should be tightened before K8s / production rollout
 - `alert-service` packaging can fail if `alert-service-0.1.0-SNAPSHOT.jar` is locked by a running
   local process; stop the running jar before rebuilding the image layer
 - Long-lived `kubectl exec -it ... kafka-avro-console-consumer` sessions can exit with `137`
   during local validation; prefer one-shot produce/consume checks when debugging Phase 6
 - For Phase 7 local monitoring bring-up, run `scripts/install-monitoring.ps1` before
   `kubectl apply -k .\k8s\overlays\local` so the ServiceMonitor and PodMonitor CRDs exist
+- `AlertServiceConsumerLagHigh` and `AlertServiceDown` intentionally cover different cases:
+  - lag high = service is alive but falling behind
+  - absent metric = service is down / missing from scrape targets
 
 ---
 

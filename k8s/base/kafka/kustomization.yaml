@@ -6,4 +6,5 @@ resources:
   - topics/decision-audit.yaml
   - topics/high-risk-events.yaml
   - topics/alert-events.yaml
+  - topics/alert-events-dlq.yaml
   - topics/rule-updates.yaml

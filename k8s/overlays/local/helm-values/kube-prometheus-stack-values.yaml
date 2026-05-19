@@ -17,5 +17,44 @@ grafana:
 
 alertmanager:
   enabled: true
+  config:
+    global:
+      resolve_timeout: 5m
+      smtp_smarthost: localhost:587
+      smtp_from: realrisk-alerts@example.com
+      smtp_auth_username: realrisk
+      smtp_auth_password_file: /etc/alertmanager/secrets/realrisk-alertmanager-secrets/smtp-password
+      slack_api_url_file: /etc/alertmanager/secrets/realrisk-alertmanager-secrets/slack-webhook-url
+    route:
+      receiver: slack-warnings
+      group_by:
+        - alertname
+        - severity
+      routes:
+        - matchers:
+            - severity="critical"
+          receiver: critical-both
+        - matchers:
+            - severity="warning"
+          receiver: slack-warnings
+    receivers:
+      - name: slack-warnings
+        slack_configs:
+          - channel: "#realrisk-alerts"
+            send_resolved: true
+            title: '{{ .CommonLabels.alertname }}'
+            text: '{{ .CommonAnnotations.summary }}'
+      - name: critical-both
+        email_configs:
+          - to: oncall@example.com
+            send_resolved: true
+        slack_configs:
+          - channel: "#realrisk-alerts"
+            send_resolved: true
+            title: '{{ .CommonLabels.alertname }}'
+            text: '{{ .CommonAnnotations.summary }}'
   alertmanagerSpec:
     storage: {}
+    alertmanagerConfigSelector: {}
+    secrets:
+      - realrisk-alertmanager-secrets

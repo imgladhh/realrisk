@@ -2,3 +2,4 @@ namespace: monitoring
 
 resources:
   - grafana-dashboard-configmap.yaml
+  - alerts

@@ -1,0 +1,4 @@
+resources:
+  - consumer-lag.yaml
+  - flink-checkpoints.yaml
+  - api-gateway-errors.yaml
