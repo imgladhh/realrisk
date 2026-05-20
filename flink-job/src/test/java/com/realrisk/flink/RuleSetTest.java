@@ -17,6 +17,8 @@ class RuleSetTest {
           "http://localhost:8081",
           "localhost",
           6379,
+          "",
+          "",
           "raw-events",
           "rule-updates",
           "decision-audit",
