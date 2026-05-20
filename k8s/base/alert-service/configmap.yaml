@@ -5,8 +5,8 @@ metadata:
 data:
   SERVER_PORT: "8080"
   DB_URL: jdbc:postgresql://postgres.invalid:5432/realrisk
-  REDIS_SENTINEL_MASTER: mymaster
-  REDIS_SENTINEL_NODES: redis.invalid:26379
+  SPRING_DATA_REDIS_SENTINEL_MASTER: mymaster
+  SPRING_DATA_REDIS_SENTINEL_NODES: redis.invalid:26379
   KAFKA_BOOTSTRAP_SERVERS: kafka.invalid:9092
   SCHEMA_REGISTRY_URL: http://schema-registry.invalid:8081
   ALERT_EVENTS_TOPIC: alert-events

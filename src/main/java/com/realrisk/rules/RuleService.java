@@ -17,7 +17,6 @@ import java.util.Set;
 import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -44,14 +43,6 @@ public class RuleService {
   private final Clock clock;
 
   public RuleService(
-      JdbcTemplate jdbcTemplate,
-      ObjectMapper objectMapper,
-      RuleUpdatePublisher publisher,
-      RiskProperties properties) {
-    this(jdbcTemplate, objectMapper, publisher, properties, Clock.systemUTC());
-  }
-
-  RuleService(
       JdbcTemplate jdbcTemplate,
       ObjectMapper objectMapper,
       RuleUpdatePublisher publisher,
