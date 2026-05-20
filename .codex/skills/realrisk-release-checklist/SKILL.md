@@ -36,8 +36,8 @@ Use this skill for RealRisk tasks that involve:
 - Treat "validated" as stronger than "scaffolded"; prefer documenting the stronger state only when we have evidence.
 - Keep `memory.md` easy to scan. Move stale migration notes out of `In Progress`.
 - If a new script was added, check whether it needs to be mentioned in both `Done` and `Scripts`.
+- If a phase surfaced repeatable validation traps (PowerShell quoting, pod-specific tooling, failover timing, exporter prerequisites, etc.), write the durable parts back into the relevant RealRisk skill before calling the phase "wrapped up".
 
 ## Reference
 
 For the repo's current closeout expectations, read [references/closeout-notes.md](references/closeout-notes.md).
-
