@@ -37,6 +37,12 @@ Use this skill for RealRisk tasks that involve:
 - Keep `memory.md` easy to scan. Move stale migration notes out of `In Progress`.
 - If a new script was added, check whether it needs to be mentioned in both `Done` and `Scripts`.
 - If a phase surfaced repeatable validation traps (PowerShell quoting, pod-specific tooling, failover timing, exporter prerequisites, etc.), write the durable parts back into the relevant RealRisk skill before calling the phase "wrapped up".
+- Before pushing CI-related changes, sanity-check the workflow against the GitHub runner environment:
+  - do not reference repo-local tools like `./.tools/maven/bin/mvn` unless they are actually committed
+  - if CI uses `mvn -DskipTests package`, remember that Maven still compiles test sources, so stale test constructors can still break `build-and-push`
+  - prefer `secrets.GITHUB_TOKEN` plus `permissions: packages: write` for GHCR login unless there is a specific reason to maintain a separate package token
+  - if the configured `KUBE_CONFIG` points at a local cluster (`localhost`, kind, Docker Desktop), do not run deploy automatically on every push; gate deploy behind `workflow_dispatch` or another explicit manual trigger
+- For Spring Boot integration tests that run in GitHub Actions but not reliably on the local Windows machine, expect to use one CI round to surface the real `Caused by:` and then make a focused fix. Do not trust the outer `Failed to load ApplicationContext` wrapper as the root cause.
 
 ## Reference
 
