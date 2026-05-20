@@ -26,7 +26,8 @@ class RiskWorkerTest {
                 "decision-audit",
                 "high-risk-events",
                 "alert-events"),
-            new RiskProperties.RateLimit(60_000, 5));
+            new RiskProperties.RateLimit(60_000, 5),
+            new RiskProperties.RuleOutbox(5_000, 100));
     var worker = new RiskWorker(kafkaTemplate, properties);
 
     worker.evaluate(event("event-1"));

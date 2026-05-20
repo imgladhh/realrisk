@@ -56,3 +56,6 @@ realrisk:
   rate-limit:
     window-ms: ${RISK_WINDOW_MS:60000}
     limit: ${RISK_LIMIT:5}
+  rule-outbox:
+    poll-interval-ms: ${RULE_OUTBOX_POLL_INTERVAL_MS:5000}
+    batch-size: ${RULE_OUTBOX_BATCH_SIZE:100}

@@ -5,7 +5,11 @@ param(
     [string]$StrimziNamespace = "strimzi-system",
     [string]$StrimziChartVersion = "0.45.2",
     [string]$CnpgNamespace = "cnpg-system",
-    [string]$CnpgChartVersion = "0.23.2"
+    [string]$CnpgChartVersion = "0.23.2",
+    [string]$SlackWebhookUrl = "https://hooks.slack.invalid/services/placeholder",
+    [string]$SmtpPassword = "placeholder",
+    [string]$SmtpFrom = "realrisk@example.com",
+    [string]$EmailApiKey = "placeholder"
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,10 +81,10 @@ kubectl wait --for=condition=Ready pod `
 
 kubectl create secret generic realrisk-notification-secrets `
     -n $Namespace `
-    --from-literal=slack-webhook-url=https://hooks.slack.invalid/services/placeholder `
-    --from-literal=smtp-password=placeholder `
-    --from-literal=smtp-from=realrisk@example.com `
-    --from-literal=email-api-key=placeholder `
+    --from-literal=slack-webhook-url=$SlackWebhookUrl `
+    --from-literal=smtp-password=$SmtpPassword `
+    --from-literal=smtp-from=$SmtpFrom `
+    --from-literal=email-api-key=$EmailApiKey `
     --dry-run=client -o yaml | kubectl apply -f -
 
 Write-Host ""

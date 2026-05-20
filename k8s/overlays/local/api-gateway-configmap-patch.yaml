@@ -8,3 +8,5 @@ data:
   REDIS_SENTINEL_NODES: realrisk-redis-node-0.realrisk-redis-headless.realrisk.svc.cluster.local:26379,realrisk-redis-node-1.realrisk-redis-headless.realrisk.svc.cluster.local:26379,realrisk-redis-node-2.realrisk-redis-headless.realrisk.svc.cluster.local:26379
   KAFKA_BOOTSTRAP_SERVERS: realrisk-kafka-kafka-bootstrap.realrisk.svc.cluster.local:9092
   SCHEMA_REGISTRY_URL: http://realrisk-schema-registry.realrisk.svc.cluster.local:8081
+  RULE_OUTBOX_POLL_INTERVAL_MS: "2000"
+  RULE_OUTBOX_BATCH_SIZE: "100"

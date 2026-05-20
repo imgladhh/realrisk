@@ -25,7 +25,8 @@ class RateLimitServiceTest {
                 "decision-audit",
                 "high-risk-events",
                 "alert-events"),
-            new RiskProperties.RateLimit(2_000, 5));
+            new RiskProperties.RateLimit(2_000, 5),
+            new RiskProperties.RuleOutbox(5_000, 100));
     rateLimitService = new RateLimitService(template, properties);
   }
 
