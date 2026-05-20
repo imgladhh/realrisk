@@ -34,10 +34,10 @@ jobs:
           cache: maven
 
       - name: Verify root module
-        run: ./.tools/maven/bin/mvn -B verify
+        run: mvn -B verify
 
       - name: Verify alert-service module
-        run: ./.tools/maven/bin/mvn -B -f ./alert-service/pom.xml verify
+        run: mvn -B -f ./alert-service/pom.xml verify
 
   build-and-push:
     runs-on: ubuntu-latest
@@ -56,9 +56,9 @@ jobs:
 
       - name: Package application jars
         run: |
-          ./.tools/maven/bin/mvn -B -DskipTests package
-          ./.tools/maven/bin/mvn -B -f ./alert-service/pom.xml -DskipTests package
-          ./.tools/maven/bin/mvn -B -f ./flink-job/pom.xml -DskipTests package
+          mvn -B -DskipTests package
+          mvn -B -f ./alert-service/pom.xml -DskipTests package
+          mvn -B -f ./flink-job/pom.xml -DskipTests package
 
       - name: Build API Gateway image
         run: |
