@@ -2,7 +2,7 @@
 
 > Living context for AI-assisted development sessions.
 > Update `Done`, `In Progress`, `Next`, and `Known Issues` at the end of each session.
-> Last updated: 2026-05-20
+> Last updated: 2026-05-19 (Phase 10 acceptance recorded)
 
 ---
 
@@ -191,8 +191,7 @@ Full topology: `docs/architecture-diagram.md`
     - `pom.xml` root: `spring-boot-maven-plugin` now uses `<layout>ZIP</layout>` to enable `-Dloader.main` PropertiesLauncher override
     - `AlertDlqPublisher` now writes `severity` header so `--severity HIGH` filter works
     - `waitForAssignment` extended to 40 attempts (~14 s) for K8s coordinator latency
-    - Dry-run mode confirmed working in-cluster ✅
-    - Execute acceptance: needs one fresh HIGH severity DLQ message → dry-run → execute → check alert_log (⬜ final step remaining)
+    - Dry-run confirmed in-cluster ✅; execute path confirmed (DLQ → alert-events → alert-service re-consumed) ✅
   - Validation (core paths):
     - `realrisk-cluster-app` Secret read path: ✅ (method A — temporary Secret + ExternalName Service)
     - `kafka_consumergroup_lag` appeared in exporter after committed offset baseline established ✅
@@ -200,11 +199,42 @@ Full topology: `docs/architecture-diagram.md`
     - `AlertServiceDown` fired and resolved on scale-to-0 / scale-to-1 cycle ✅
     - DLQ replay in-cluster: dry-run matched and printed DLQ records ✅
     - DLQ replay execute: message flowed DLQ → alert-events → alert-service re-consumed it ✅
-  - Pending (environment-blocked, not code issues):
-    - CNPG operator not installed (no `helm`); `Cluster` CRD absent; temporary method-A workaround in place
-    - Redis Sentinel not yet deployed (same Helm blocker)
-    - Real notification channel smoke test pending (need `realrisk-notification-secrets` created)
-    - DLQ replay → alert_log PROCESSED: deferred (replay tool path proven; alert-service processing proven separately in Phase 4/6/8; test data issue only)
+  - Validation (infra acceptance):
+    - CNPG primary+replica both Running; Flyway migrations ran successfully on CNPG ✅
+    - Business smoke test: POST /events → ACCEPTED → raw_events row visible in CNPG ✅
+    - CNPG failover: deleted primary realrisk-cluster-1 → realrisk-cluster-2 promoted; post-failover event landed in new primary ✅
+    - Redis Sentinel: 3 nodes (1 master + 2 replicas), quorum 2, num-other-sentinels=2 ✅
+    - Redis Sentinel failover: deleted master realrisk-redis-node-2 → new master elected; post-failover API request returned 202 ACCEPTED ✅
+  - Not validated (deferred, non-blocking):
+    - Real notification channel delivery (email/Slack): pending `realrisk-notification-secrets` with live credentials
+    - DLQ replay → alert_log PROCESSED: deferred (replay tool path proven; alert-service processing proven in Phase 4/6/8)
+- Phase 10
+  - `/admin/rules` REST endpoint in api-gateway: POST (upsert), GET (list), DELETE (disable)
+  - DB migration `V4__rules_outbox.sql`: `rules` table + `rule_outbox` table + unpublished index
+  - `RuleService`: transactional upsert + disable writing atomically to both tables
+  - `publishPendingOutbox()` @Scheduled poller: publishes to `rule-updates` Kafka topic, marks `published_at`; breaks on first failure to preserve ordering
+  - `RuleUpdatePublisher`: wraps `KafkaTemplate` with 10 s blocking send
+  - `Clock` injected via `@Bean` in `RealRiskApplication`; `RuleService` has single Spring-injectable constructor
+  - `RiskProperties` extended with `RuleOutbox(pollIntervalMs, batchSize)`
+  - `@EnableScheduling` added to `RealRiskApplication`
+  - CI workflow: `packages: write` permission, GHCR image names, kubeconfig from `secrets.KUBECONFIG` base64-decoded, deploy job gated on `workflow_dispatch`
+  - `install-infra.ps1`: parameterized notification secrets, local Helm binary fallback
+  - K8s ConfigMaps migrated to standard Spring env var names for Redis Sentinel:
+    - `SPRING_DATA_REDIS_SENTINEL_MASTER` / `SPRING_DATA_REDIS_SENTINEL_NODES`
+    - applied to both `base/` configmaps and all overlays (local + prod)
+  - Tests: `RuleServiceTest` (upsertRule, disableRule 404, publishPendingOutbox ordering break), `AdminRulesControllerTest` (POST 201, GET 200, DELETE 204)
+  - Phase 10 validation notes:
+    - local kind validation should use a unique image tag plus `kind load docker-image`; mutable reuse of an older tag can leave the node running stale application contents
+    - after any `kubectl apply -k .\k8s\overlays\local`, re-check the deployment image because the overlay resets the api-gateway image back to its rendered tag and may overwrite a temporary validation image set via `kubectl set image`
+  - Kubernetes validation (commit 01a5faa):
+    - `POST /admin/rules` → 201, rule written to `rules` table ✅
+    - `GET /admin/rules` → 200, rule listed with `enabled=true` ✅
+    - `rule_outbox` enable record `published_at` filled within 2 s ✅
+    - POST /events with `amountCents=600000` → `BLOCK / {large_amount}` in `risk_decisions` ✅
+    - `DELETE /admin/rules/{ruleId}` → 204, `rules.enabled=false` ✅
+    - `rule_outbox` disable record `published_at` filled ✅
+    - POST /events with `amountCents=600000` after disable → `ALLOW / score=0 / {}` ✅
+    - Full chain: rule persistence → outbox → Kafka `rule-updates` → Flink broadcast state → decision live/retracted ✅
 - Tooling / docs
   - `scripts/run-api.ps1`
   - `scripts/send-rule-update.ps1`
@@ -214,17 +244,16 @@ Full topology: `docs/architecture-diagram.md`
 
 ### In Progress
 
-_Nothing currently in active development. Phase 9 core acceptance is complete._
+_Nothing. Phase 10 fully complete and Kubernetes-validated._
 
 ### Next
 
-1. Phase 9 closeout cleanup
-   - Create real `realrisk-notification-secrets` and validate Slack / email delivery
-   - Decide whether to remove any remaining temporary method-A compatibility artifacts now that CNPG is healthy
-2. Phase 10 spec (to be written)
-   - GitHub Actions runner-side acceptance (PR → test → merge → push → deploy to kind)
-   - AlertManager receiver delivery with real SMTP / Slack secrets
-   - Any remaining production-hardening items from the roadmap
+1. Notification delivery validation (deferred from Phase 9/10)
+   - Populate `realrisk-notification-secrets` with live SMTP credentials and Slack webhook URL
+   - Trigger a CRITICAL alert and verify email + Slack receipt end-to-end
+   - Validate AlertManager receiver (PagerDuty / webhook) if routing rules are configured
+2. Phase 11 (to be specced)
+   - Candidates: API authentication/authorization (admin endpoints currently unauthenticated), rate-limit visibility API, Flink savepoint automation, prod overlay hardening
 
 ---
 
@@ -606,8 +635,11 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
 - `kafka-avro-console-consumer --from-beginning --timeout-ms ...` timing out with
   `Processed a total of 0 messages` is a valid signal that the topic is actually empty,
   not necessarily a consumer bug
-- `alert-service` integration test is written with Testcontainers but currently auto-skips in
-  this environment because the JVM cannot see a valid Docker socket
+- `alert-service` integration test runs on GitHub Actions (Docker available) but auto-skips locally (no Docker socket)
+- `AlertServiceIntegrationTest` requires explicit `@DynamicPropertySource` overrides for all Phase 9 new config: `spring.mail.*`, `NOTIFICATION_EMAIL_ENABLED=false`, `NOTIFICATION_SLACK_ENABLED=false`, `spring.data.redis.sentinel.*`; omitting these causes `Failed to load ApplicationContext` on CI runners (commit 56558db)
+- GitHub CI: use `mvn` (system Maven), not `./.tools/maven/bin/mvn` — the `.tools` directory does not exist on GitHub runners
+- Phase 10 kind image loading: `docker tag <old> <new>` only re-labels; always run `docker build` first, then `kind load docker-image <new-tag>`, then `kubectl set image`; same-tag images in kind nodes are not evicted automatically
+- Phase 10 Redis Sentinel env var naming: apps expect standard Spring Boot names (`SPRING_DATA_REDIS_SENTINEL_MASTER` / `SPRING_DATA_REDIS_SENTINEL_NODES`); custom-named vars (e.g. `REDIS_SENTINEL_*`) are silently ignored and cause Spring to fall back to `localhost:6379`
 - `alert-service` packaging can fail if `alert-service-0.1.0-SNAPSHOT.jar` is locked by a running
   local process; stop the running jar before rebuilding the image layer
 - Long-lived `kubectl exec -it ... kafka-avro-console-consumer` sessions can exit with `137`
