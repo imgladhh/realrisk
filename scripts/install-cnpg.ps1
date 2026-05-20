@@ -5,12 +5,25 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$localHelm = Join-Path $repoRoot ".tools\helm\windows-amd64\helm.exe"
+$helm = Get-Command helm -ErrorAction SilentlyContinue
+if ($helm) {
+    $helmCmd = $helm.Source
+}
+elseif (Test-Path $localHelm) {
+    $helmCmd = $localHelm
+}
+else {
+    throw "Helm not found in PATH and local Helm binary missing at $localHelm"
+}
+
 kubectl create namespace $Namespace --dry-run=client -o yaml | kubectl apply -f -
 
-helm repo add cloudnative-pg https://cloudnative-pg.github.io/charts/ | Out-Null
-helm repo update | Out-Null
+& $helmCmd repo add cloudnative-pg https://cloudnative-pg.github.io/charts/ | Out-Null
+& $helmCmd repo update | Out-Null
 
-helm upgrade --install cnpg `
+& $helmCmd upgrade --install cnpg `
     cloudnative-pg/cloudnative-pg `
     --version $ChartVersion `
     --namespace $Namespace `

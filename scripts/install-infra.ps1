@@ -13,6 +13,17 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $overlayRoot = Join-Path $repoRoot "k8s\overlays\$Overlay"
 $redisValues = Join-Path $overlayRoot "helm-values\redis-values.yaml"
+$localHelm = Join-Path $repoRoot ".tools\helm\windows-amd64\helm.exe"
+$helm = Get-Command helm -ErrorAction SilentlyContinue
+if ($helm) {
+    $helmCmd = $helm.Source
+}
+elseif (Test-Path $localHelm) {
+    $helmCmd = $localHelm
+}
+else {
+    throw "Helm not found in PATH and local Helm binary missing at $localHelm"
+}
 
 if (-not (Test-Path $redisValues)) {
     throw "Missing Redis Helm values file: $redisValues"
@@ -20,15 +31,15 @@ if (-not (Test-Path $redisValues)) {
 
 kubectl create namespace $Namespace --dry-run=client -o yaml | kubectl apply -f -
 
-helm repo add strimzi https://strimzi.io/charts/ | Out-Null
-helm repo add bitnami https://charts.bitnami.com/bitnami | Out-Null
-helm repo update | Out-Null
+& $helmCmd repo add strimzi https://strimzi.io/charts/ | Out-Null
+& $helmCmd repo add bitnami https://charts.bitnami.com/bitnami | Out-Null
+& $helmCmd repo update | Out-Null
 
 & (Join-Path $PSScriptRoot "install-cnpg.ps1") `
     -Namespace $CnpgNamespace `
     -ChartVersion $CnpgChartVersion
 
-helm upgrade --install strimzi-kafka-operator `
+& $helmCmd upgrade --install strimzi-kafka-operator `
     strimzi/strimzi-kafka-operator `
     --version $StrimziChartVersion `
     --namespace $StrimziNamespace `
@@ -53,7 +64,7 @@ kubectl rollout status deployment/strimzi-cluster-operator `
     -n $StrimziNamespace `
     --timeout=300s
 
-helm upgrade --install realrisk-redis `
+& $helmCmd upgrade --install realrisk-redis `
     bitnami/redis `
     --namespace $Namespace `
     --create-namespace `

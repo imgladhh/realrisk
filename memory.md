@@ -2,7 +2,7 @@
 
 > Living context for AI-assisted development sessions.
 > Update `Done`, `In Progress`, `Next`, and `Known Issues` at the end of each session.
-> Last updated: 2026-05-19
+> Last updated: 2026-05-20
 
 ---
 
@@ -214,15 +214,13 @@ Full topology: `docs/architecture-diagram.md`
 
 ### In Progress
 
-_Nothing currently in active development. Phase 9 code is complete; three acceptance items are environment-blocked pending Helm installation._
+_Nothing currently in active development. Phase 9 core acceptance is complete._
 
 ### Next
 
-1. Phase 9 environment-blocked acceptance (prerequisite: install Helm)
-   - Install Helm: binary download to `.tools/helm/` or `winget install Helm.Helm`
-   - CNPG: run `install-cnpg.ps1`, verify `realrisk-cluster` primary+replica Ready, delete the temporary `realrisk-cluster-app` Secret and `realrisk-cluster-rw` ExternalName Service created for method-A validation
-   - Redis Sentinel: run Helm upgrade with sentinel values, verify 3-pod quorum and failover
-   - Notifications: create `realrisk-notification-secrets` (SMTP + Slack webhook), verify email/Slack delivery of a real HIGH alert
+1. Phase 9 closeout cleanup
+   - Create real `realrisk-notification-secrets` and validate Slack / email delivery
+   - Decide whether to remove any remaining temporary method-A compatibility artifacts now that CNPG is healthy
 2. Phase 10 spec (to be written)
    - GitHub Actions runner-side acceptance (PR → test → merge → push → deploy to kind)
    - AlertManager receiver delivery with real SMTP / Slack secrets
@@ -562,6 +560,33 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
 - Default mode is dry-run; `-Execute` mode republishes to `alert-events` and adds `x-replayed-at` / `x-replayed-by` headers
 - `AlertDlqPublisher` writes a `severity` header on every DLQ write (required for `--severity` filter to work)
 - `kafka_consumergroup_lag` only appears in exporter after the consumer group has committed offsets on a partition; `-1` means no committed offset baseline (not zero lag)
+
+### Phase 9 acceptance addendum (2026-05-20)
+
+- Local Helm fallback was installed under `.tools/helm/windows-amd64/helm.exe`, and both `scripts/install-cnpg.ps1` and `scripts/install-infra.ps1` now use that fallback when `helm` is not present on PATH
+- `install-infra.ps1 -Overlay local` succeeded, including:
+  - CloudNativePG operator install in `cnpg-system`
+  - Strimzi operator refresh
+  - Redis Helm upgrade
+  - placeholder `realrisk-notification-secrets` creation
+- `kubectl apply -k .\k8s\overlays\local` succeeded after removing the temporary method-A `realrisk-cluster-rw` Service that blocked CNPG ownership
+- CNPG validation completed:
+  - `realrisk-cluster` reached `READY 2/2`
+  - Flyway tables were present in CNPG (`alert_log`, `raw_events`, `risk_decisions`, etc.)
+  - accepted event `req-phase9-cnpg-01` landed in CNPG `raw_events`
+  - deleting `realrisk-cluster-1` promoted `realrisk-cluster-2`, and a post-failover event (`user-failover-01`) also landed in `raw_events`
+- Redis Sentinel validation completed:
+  - local Redis now runs as 1 master + 2 replicas with 3 sentinel sidecars (`replica.replicaCount: 3`)
+  - `SENTINEL masters` reported `num-slaves=2` and `num-other-sentinels=2`
+  - deleting the master pod promoted a new master, and a post-failover API request still returned `202 ACCEPTED`
+- Kafka exporter / broker-side lag validation remains complete:
+  - `kafka_consumergroup_lag` emitted after committed offset baseline was established
+  - `AlertServiceConsumerLagHigh` fired
+  - `AlertServiceDown` fired and later resolved
+- DLQ replay validation remains complete at the core-path level:
+  - in-cluster `DlqReplayTool` dry-run worked
+  - replayed DLQ message flowed back to `alert-events` and was re-consumed by `alert-service`
+  - a fresh `alert_log` `PROCESSED` row is still deferred because that requires cleaner replay sample data, not further replay-tool code changes
 
 ### Decision idempotency
 
