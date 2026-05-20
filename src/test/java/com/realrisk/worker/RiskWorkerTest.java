@@ -20,7 +20,12 @@ class RiskWorkerTest {
     var properties =
         new RiskProperties(
             new RiskProperties.Topics(
-                "raw-events", "raw-audit", "decision-audit", "high-risk-events", "alert-events"),
+                "raw-events",
+                "rule-updates",
+                "raw-audit",
+                "decision-audit",
+                "high-risk-events",
+                "alert-events"),
             new RiskProperties.RateLimit(60_000, 5));
     var worker = new RiskWorker(kafkaTemplate, properties);
 
