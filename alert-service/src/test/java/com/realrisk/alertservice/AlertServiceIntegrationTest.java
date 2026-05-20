@@ -62,8 +62,6 @@ class AlertServiceIntegrationTest {
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("spring.data.redis.host", REDIS::getHost);
     registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
-    registry.add("spring.data.redis.sentinel.master", () -> "");
-    registry.add("spring.data.redis.sentinel.nodes", () -> "");
     registry.add("spring.mail.host", () -> "localhost");
     registry.add("spring.mail.port", () -> 29025);
     registry.add("NOTIFICATION_EMAIL_ENABLED", () -> "false");
