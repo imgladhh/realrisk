@@ -55,12 +55,7 @@ public class MerchantBurstProcessFunction
                 new MapStateDescriptor<>("merchant-user-seen-at", String.class, Long.class));
 
     try {
-      redisClient =
-          RedisClient.create(
-              RedisURI.builder()
-                  .withHost(config.redisHost())
-                  .withPort(config.redisPort())
-                  .build());
+      redisClient = RedisClient.create(buildRedisUri());
       redisConnection = redisClient.connect();
       userProfileReader = new RedisUserProfileReader(redisConnection.sync());
     } catch (RuntimeException e) {
@@ -132,6 +127,28 @@ public class MerchantBurstProcessFunction
       count++;
     }
     return count;
+  }
+
+  private RedisURI buildRedisUri() {
+    if (config.redisSentinelNodes() == null
+        || config.redisSentinelNodes().isBlank()
+        || config.redisSentinelMaster() == null
+        || config.redisSentinelMaster().isBlank()) {
+      return RedisURI.builder().withHost(config.redisHost()).withPort(config.redisPort()).build();
+    }
+
+    RedisURI.Builder builder = RedisURI.builder().withSentinelMasterId(config.redisSentinelMaster());
+    for (String rawNode : config.redisSentinelNodes().split(",")) {
+      String node = rawNode.trim();
+      if (node.isBlank()) {
+        continue;
+      }
+      String[] parts = node.split(":");
+      String host = parts[0].trim();
+      int port = parts.length > 1 ? Integer.parseInt(parts[1].trim()) : 26379;
+      builder.withSentinel(host, port);
+    }
+    return builder.build();
   }
 
   @Override

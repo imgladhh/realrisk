@@ -2,7 +2,7 @@
 
 > Living context for AI-assisted development sessions.
 > Update `Done`, `In Progress`, `Next`, and `Known Issues` at the end of each session.
-> Last updated: 2026-05-18
+> Last updated: 2026-05-19
 
 ---
 
@@ -165,6 +165,46 @@ Full topology: `docs/architecture-diagram.md`
     - `alert_dlq_published_total{severity="unknown"} 1.0` confirmed in `alert-service` actuator metrics
     - `AlertServiceDown` fired after scaling `alert-service` to `0`
     - `alert_consumer_lag{namespace="realrisk"}` returned after scaling `alert-service` back to `1`
+- Phase 9
+  - Migrated DB credential source to CloudNativePG pattern:
+    - `api-gateway` and `alert-service` read DB credentials from `realrisk-cluster-app` Secret
+    - DB URL set to `jdbc:postgresql://realrisk-cluster-rw.realrisk.svc.cluster.local:5432/realrisk`
+    - Validation (method A): temporary `realrisk-cluster-app` Secret + `realrisk-cluster-rw` ExternalName Service pointing back to Bitnami PostgreSQL; both pods recovered 1/1 Running ✅
+  - Added `k8s/base/postgresql/cluster.yaml` (CloudNativePG `Cluster` CRD, 2 instances)
+  - Switched Redis wiring to Sentinel-aware config:
+    - Flink: `buildRedisUri()` in `MerchantBurstProcessFunction`, falls back to direct host/port when sentinel fields empty
+    - alert-service / api-gateway: `spring.data.redis.sentinel.master/nodes` env vars
+    - Bitnami Redis Helm values: `sentinel.enabled: true`, `quorum: 2`, `replicaCount: 2`
+  - Added real notification channels:
+    - `EmailNotificationChannel` (JavaMailSender, `NOTIFICATION_EMAIL_ENABLED`)
+    - `PushNotificationChannel` (Slack webhook via RestClient, guards missing webhook URL)
+    - `SmsNotificationChannel` (WARN stub only)
+    - `realrisk-notification-secrets` holds SMTP/Slack credentials (created out-of-band)
+  - Replaced broker JMX metrics path with Strimzi `kafkaExporter`:
+    - `kafkaExporter.topicRegex` / `groupRegex` added to Kafka CR
+    - `k8s/base/kafka/service-kafka-exporter.yaml` added manually (Strimzi 3.9.x does not auto-create Service)
+    - `service-monitor-kafka-exporter.yaml` targets `strimzi.io/name: realrisk-kafka-kafka-exporter`
+    - `AlertServiceConsumerLagHigh` uses `sum(kafka_consumergroup_lag{...})` (broker-side)
+    - Validation: `kafka_consumergroup_lag` appeared after alert-service committed offsets on all partitions; `AlertServiceConsumerLagHigh` fired; `AlertServiceDown` fired then resolved ✅
+  - Added `DlqReplayTool` + `replay-dlq.ps1`:
+    - Tool runs in-cluster via `kubectl run --rm --attach` (not locally via Maven)
+    - `pom.xml` root: `spring-boot-maven-plugin` now uses `<layout>ZIP</layout>` to enable `-Dloader.main` PropertiesLauncher override
+    - `AlertDlqPublisher` now writes `severity` header so `--severity HIGH` filter works
+    - `waitForAssignment` extended to 40 attempts (~14 s) for K8s coordinator latency
+    - Dry-run mode confirmed working in-cluster ✅
+    - Execute acceptance: needs one fresh HIGH severity DLQ message → dry-run → execute → check alert_log (⬜ final step remaining)
+  - Validation (core paths):
+    - `realrisk-cluster-app` Secret read path: ✅ (method A — temporary Secret + ExternalName Service)
+    - `kafka_consumergroup_lag` appeared in exporter after committed offset baseline established ✅
+    - `AlertServiceConsumerLagHigh` fired at lag > 10 ✅
+    - `AlertServiceDown` fired and resolved on scale-to-0 / scale-to-1 cycle ✅
+    - DLQ replay in-cluster: dry-run matched and printed DLQ records ✅
+    - DLQ replay execute: message flowed DLQ → alert-events → alert-service re-consumed it ✅
+  - Pending (environment-blocked, not code issues):
+    - CNPG operator not installed (no `helm`); `Cluster` CRD absent; temporary method-A workaround in place
+    - Redis Sentinel not yet deployed (same Helm blocker)
+    - Real notification channel smoke test pending (need `realrisk-notification-secrets` created)
+    - DLQ replay → alert_log PROCESSED: deferred (replay tool path proven; alert-service processing proven separately in Phase 4/6/8; test data issue only)
 - Tooling / docs
   - `scripts/run-api.ps1`
   - `scripts/send-rule-update.ps1`
@@ -174,17 +214,19 @@ Full topology: `docs/architecture-diagram.md`
 
 ### In Progress
 
-- No active implementation work in progress
+_Nothing currently in active development. Phase 9 code is complete; three acceptance items are environment-blocked pending Helm installation._
 
 ### Next
 
-1. Phase 8 candidates
-   - GitHub Actions runner-side acceptance (PR test / main push / GHCR push / deploy)
-   - AlertManager receiver delivery validation with real SMTP / Slack secrets
-2. Phase 9 candidates
-   - CloudNativePG or equivalent production-grade PostgreSQL operator
-   - stronger production HA separation for Redis/PostgreSQL
-   - broker-side Kafka lag exporter to replace consumer-owned lag metrics
+1. Phase 9 environment-blocked acceptance (prerequisite: install Helm)
+   - Install Helm: binary download to `.tools/helm/` or `winget install Helm.Helm`
+   - CNPG: run `install-cnpg.ps1`, verify `realrisk-cluster` primary+replica Ready, delete the temporary `realrisk-cluster-app` Secret and `realrisk-cluster-rw` ExternalName Service created for method-A validation
+   - Redis Sentinel: run Helm upgrade with sentinel values, verify 3-pod quorum and failover
+   - Notifications: create `realrisk-notification-secrets` (SMTP + Slack webhook), verify email/Slack delivery of a real HIGH alert
+2. Phase 10 spec (to be written)
+   - GitHub Actions runner-side acceptance (PR → test → merge → push → deploy to kind)
+   - AlertManager receiver delivery with real SMTP / Slack secrets
+   - Any remaining production-hardening items from the roadmap
 
 ---
 
@@ -484,6 +526,43 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
 - Compose Kafka must expose `host.docker.internal:19092` and may need a force-recreate after listener changes
 - The `rule-updates` topic must exist before the K8s Flink job can stay healthy; after Kafka recreation it may need to be re-created
 
+### Phase 9 storage / HA direction
+
+- PostgreSQL is moving from Bitnami Helm to CloudNativePG
+  - base cluster resource: `realrisk-cluster`
+  - application DB credentials come from `realrisk-cluster-app`
+  - DB URL target should be `jdbc:postgresql://realrisk-cluster-rw.realrisk.svc.cluster.local:5432/realrisk`
+- Redis is moving from single-node host/port wiring to Sentinel:
+  - `REDIS_SENTINEL_MASTER=mymaster`
+  - `REDIS_SENTINEL_NODES=<sentinel host list>`
+  - applications should prefer Sentinel config over legacy `REDIS_HOST` / `REDIS_PORT`
+- Notification secrets are intentionally created out-of-band by `scripts/install-infra.ps1`
+  - secret name: `realrisk-notification-secrets`
+  - namespace: `realrisk`
+  - do not commit notification credentials to git
+
+### Phase 9 broker-side lag metrics
+
+- Do not use broker JMX / `metricsConfig` to implement consumer group lag alerts
+- Strimzi `kafkaExporter` is the correct source for:
+  - `kafka_consumergroup_lag`
+  - related consumer group offset metrics
+- `AlertServiceConsumerLagHigh` should evaluate broker-side lag via:
+  - `kafka_consumergroup_lag{consumergroup="alert-service",topic="alert-events"}`
+- `AlertServiceDown` remains separate and still covers the “consumer service disappeared” case
+
+### Phase 9 DLQ replay approach
+
+- `scripts/replay-dlq.ps1` is a thin PowerShell wrapper that runs `DlqReplayTool` **in-cluster** via `kubectl run --rm --attach --restart=Never`
+  - Do NOT run DlqReplayTool locally via Maven: port-forward only reaches the bootstrap endpoint; Kafka metadata returns in-cluster `.svc` broker addresses that a local JVM cannot resolve
+  - The in-cluster pod uses the `realrisk-api` image (contains the fat JAR)
+  - `pom.xml` root must have `<layout>ZIP</layout>` in `spring-boot-maven-plugin` to enable PropertiesLauncher (`-Dloader.main`)
+  - bootstrap address used in-cluster: `realrisk-kafka-kafka-bootstrap.realrisk.svc.cluster.local:9092`
+- Replay uses raw Kafka `byte[]` consume / produce so Avro payload bytes are preserved exactly
+- Default mode is dry-run; `-Execute` mode republishes to `alert-events` and adds `x-replayed-at` / `x-replayed-by` headers
+- `AlertDlqPublisher` writes a `severity` header on every DLQ write (required for `--severity` filter to work)
+- `kafka_consumergroup_lag` only appears in exporter after the consumer group has committed offsets on a partition; `-1` means no committed offset baseline (not zero lag)
+
 ### Decision idempotency
 
 - `decisionId` is deterministic from `eventId`
@@ -513,6 +592,9 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
 - `AlertServiceConsumerLagHigh` and `AlertServiceDown` intentionally cover different cases:
   - lag high = service is alive but falling behind
   - absent metric = service is down / missing from scrape targets
+- Strimzi `kafkaExporter` does NOT auto-create its own Kubernetes Service in Strimzi 3.9.x; `service-kafka-exporter.yaml` must be applied manually alongside the ServiceMonitor
+- `kafka_consumergroup_lag` is emitted only for partitions with committed consumer group offsets; the `sum()` in `AlertServiceConsumerLagHigh` will be negative if some partitions return `-1`, so all partitions must have committed offsets before triggering the alert with a specific lag threshold
+- `replay-dlq.ps1` must run in-cluster (see Phase 9 DLQ replay approach note above); local Maven + port-forward is NOT a valid execution model for this tool
 
 ---
 

@@ -2,6 +2,7 @@ resources:
   - ../../base
 
 patches:
+  - path: postgresql-cluster-patch.yaml
   - path: api-gateway-configmap-patch.yaml
   - path: alert-service-configmap-patch.yaml
   - path: flink-configmap-patch.yaml

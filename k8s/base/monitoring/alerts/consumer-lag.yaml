@@ -9,13 +9,13 @@ spec:
     - name: realrisk.alert-service
       rules:
         - alert: AlertServiceConsumerLagHigh
-          expr: max(alert_consumer_lag{namespace="realrisk"}) > 10
+          expr: sum(kafka_consumergroup_lag{consumergroup="alert-service",topic="alert-events",namespace="realrisk"}) > 10
           for: 5m
           labels:
             severity: warning
           annotations:
             summary: Alert service consumer lag is elevated
-            description: alert-service lag has stayed above 10 messages for more than 5 minutes.
+            description: Broker-side lag for the alert-service consumer group has stayed above 10 messages for more than 5 minutes.
         - alert: AlertServiceDown
           expr: absent(alert_consumer_lag{namespace="realrisk"})
           for: 2m

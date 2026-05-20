@@ -22,8 +22,41 @@ spec:
           envFrom:
             - configMapRef:
                 name: realrisk-alert-service-config
-            - secretRef:
-                name: realrisk-app-secrets
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: realrisk-cluster-app
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: realrisk-cluster-app
+                  key: password
+            - name: SMTP_FROM
+              valueFrom:
+                secretKeyRef:
+                  name: realrisk-notification-secrets
+                  key: smtp-from
+                  optional: true
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: realrisk-notification-secrets
+                  key: smtp-password
+                  optional: true
+            - name: SLACK_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: realrisk-notification-secrets
+                  key: slack-webhook-url
+                  optional: true
+            - name: EMAIL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: realrisk-notification-secrets
+                  key: email-api-key
+                  optional: true
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness

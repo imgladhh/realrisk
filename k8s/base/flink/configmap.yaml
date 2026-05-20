@@ -5,8 +5,8 @@ metadata:
 data:
   KAFKA_BOOTSTRAP_SERVERS: kafka.invalid:9092
   SCHEMA_REGISTRY_URL: http://schema-registry.invalid:8081
-  REDIS_HOST: redis.invalid
-  REDIS_PORT: "6379"
+  REDIS_SENTINEL_MASTER: mymaster
+  REDIS_SENTINEL_NODES: redis.invalid:26379
   RAW_EVENTS_TOPIC: raw-events
   RULE_UPDATES_TOPIC: rule-updates
   DECISION_AUDIT_TOPIC: decision-audit

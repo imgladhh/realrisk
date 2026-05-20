@@ -29,6 +29,10 @@ public class AlertMetrics {
     meterRegistry.counter("alert.dlq.published", "severity", severity).increment();
   }
 
+  public void incrementNotificationFailed(String channel) {
+    meterRegistry.counter("alert.notification.failed", "channel", channel).increment();
+  }
+
   public void setConsumerLag(long lag) {
     consumerLag.set(Math.max(lag, 0));
   }

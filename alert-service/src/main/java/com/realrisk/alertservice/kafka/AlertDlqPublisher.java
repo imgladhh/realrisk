@@ -56,12 +56,12 @@ public class AlertDlqPublisher {
     byte[] payload = extractValue(record.value());
     byte[] key = extractKey(record.key());
     Headers headers = copyHeaders(record.headers());
+    String severity = resolveSeverity(headers, payload);
     addOrReplace(headers, "x-exception-message", truncate(exception.getMessage()));
     addOrReplace(headers, "x-retry-count", Integer.toString(resolveRetryCount(record.headers())));
     addOrReplace(headers, "x-original-topic", record.topic());
     addOrReplace(headers, "x-failed-at", Instant.now(clock).toString());
-
-    String severity = resolveSeverity(headers, payload);
+    addOrReplace(headers, "severity", severity);
     ProducerRecord<byte[], byte[]> dlqRecord =
         new ProducerRecord<>(properties.getDlqTopic(), null, key, payload, headers);
 

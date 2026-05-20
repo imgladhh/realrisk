@@ -22,8 +22,17 @@ spec:
           envFrom:
             - configMapRef:
                 name: realrisk-api-gateway-config
-            - secretRef:
-                name: realrisk-app-secrets
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: realrisk-cluster-app
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: realrisk-cluster-app
+                  key: password
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness

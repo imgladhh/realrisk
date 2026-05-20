@@ -1,6 +1,8 @@
 resources:
   - kafka.yaml
   - nodepool.yaml
+  - service-kafka-exporter.yaml
+  - service-monitor-kafka-exporter.yaml
   - topics/raw-events.yaml
   - topics/raw-audit.yaml
   - topics/decision-audit.yaml

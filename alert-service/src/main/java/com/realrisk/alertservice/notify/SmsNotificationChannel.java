@@ -16,6 +16,11 @@ public class SmsNotificationChannel implements NotificationChannel {
 
   @Override
   public void send(AlertEvent event) {
-    log.info("SMS alertId={} userId={} severity={} reasons={}", event.alertId(), event.userId(), event.severity(), event.reasonSummary());
+    log.warn(
+        "SMS channel not yet implemented alertId={} userId={} severity={} reasons={}",
+        event.alertId(),
+        event.userId(),
+        event.severity(),
+        event.reasonSummary());
   }
 }

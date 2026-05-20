@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: realrisk-kafka-kafka-exporter
+  labels:
+    strimzi.io/cluster: realrisk-kafka
+    strimzi.io/name: realrisk-kafka-kafka-exporter
+spec:
+  selector:
+    strimzi.io/cluster: realrisk-kafka
+    strimzi.io/name: realrisk-kafka-kafka-exporter
+  ports:
+    - name: tcp-prometheus
+      port: 9404
+      targetPort: tcp-prometheus
