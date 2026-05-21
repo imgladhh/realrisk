@@ -3,7 +3,6 @@ kind: Deployment
 metadata:
   name: realrisk-api-gateway
 spec:
-  replicas: 2
   template:
     spec:
       containers:

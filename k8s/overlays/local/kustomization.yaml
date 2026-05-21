@@ -8,6 +8,7 @@ resources:
 patches:
   - path: postgresql-cluster-patch.yaml
   - path: api-gateway-configmap-patch.yaml
+  - path: hpa-patch.yaml
   - path: alert-service-configmap-patch.yaml
   - path: flink-configmap-patch.yaml
   - path: api-gateway-deployment-patch.yaml

@@ -6,6 +6,7 @@ param(
     [string]$StrimziChartVersion = "0.45.2",
     [string]$CnpgNamespace = "cnpg-system",
     [string]$CnpgChartVersion = "0.23.2",
+    [string]$AdminApiKey = "dev-only-insecure",
     [string]$SlackWebhookUrl = "https://hooks.slack.invalid/services/placeholder",
     [string]$SmtpPassword = "placeholder",
     [string]$SmtpFrom = "realrisk@example.com",
@@ -87,7 +88,12 @@ kubectl create secret generic realrisk-notification-secrets `
     --from-literal=email-api-key=$EmailApiKey `
     --dry-run=client -o yaml | kubectl apply -f -
 
+kubectl create secret generic realrisk-admin-api-key `
+    -n $Namespace `
+    --from-literal=api-key=$AdminApiKey `
+    --dry-run=client -o yaml | kubectl apply -f -
+
 Write-Host ""
-Write-Host "Phase 9 infra installed for overlay '$Overlay'." -ForegroundColor Green
+Write-Host "Infrastructure installed for overlay '$Overlay'." -ForegroundColor Green
 Write-Host "Next step: kubectl apply -k .\k8s\overlays\$Overlay" -ForegroundColor Green
 Write-Host "Then wait for Kafka readiness: kubectl wait kafka/realrisk-kafka --for=condition=Ready -n $Namespace --timeout=300s" -ForegroundColor Yellow
