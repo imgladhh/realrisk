@@ -2,7 +2,7 @@
 
 > Living context for AI-assisted development sessions.
 > Update `Done`, `In Progress`, `Next`, and `Known Issues` at the end of each session.
-> Last updated: 2026-05-19 (Phase 10 acceptance recorded)
+> Last updated: 2026-05-20 (Phase 11 auth and HPA acceptance recorded)
 
 ---
 
@@ -235,6 +235,32 @@ Full topology: `docs/architecture-diagram.md`
     - `rule_outbox` disable record `published_at` filled ✅
     - POST /events with `amountCents=600000` after disable → `ALLOW / score=0 / {}` ✅
     - Full chain: rule persistence → outbox → Kafka `rule-updates` → Flink broadcast state → decision live/retracted ✅
+- Phase 11
+  - Added API key protection for `/admin/**`
+    - `AdminApiKeyFilter`: constant-time `Authorization: Bearer <token>` comparison via `MessageDigest.isEqual`
+    - `SecurityConfig`: stateless Spring Security chain, filter inserted before `AnonymousAuthenticationFilter`
+    - `RealRiskApplication`: excludes `UserDetailsServiceAutoConfiguration` to avoid default generated-password noise
+  - Added api-gateway HPA
+    - `k8s/base/api-gateway/hpa.yaml`: autoscaling/v2, CPU target 60%, min 2 / max 8
+    - local overlay patch: min 1 / max 3 / CPU 70 for kind
+    - removed `spec.replicas` from the base Deployment so HPA owns replica count
+  - Added admin API key secret wiring
+    - `deployment.yaml` reads `ADMIN_API_KEY` from `realrisk-admin-api-key`
+    - `scripts/install-infra.ps1` now supports `-AdminApiKey` and creates the Secret idempotently
+  - Tests
+    - `AdminApiKeyFilterTest` covers:
+      - no token → 401
+      - wrong token → 401
+      - correct token → 200
+      - `/events` and `/actuator/health` bypass auth
+  - Kubernetes validation (local kind, commit `b38793d`)
+    - `realrisk-admin-api-key` Secret created in `realrisk` namespace ✅
+    - api-gateway rolled out on a unique image tag: `realrisk-api:phase11-admin-hpa` ✅
+    - `POST /admin/rules` without token → `401` ✅
+    - `POST /admin/rules` with `Authorization: Bearer dev-only-insecure` → `201` ✅
+    - `rules` table contains `p11-test` with `enabled = true` ✅
+    - `POST /events` without token → `202 ACCEPTED` ✅
+    - `kubectl get hpa -n realrisk` shows `realrisk-api-gateway-hpa` with `MINPODS=1`, `MAXPODS=3`, `REPLICAS=1` ✅
 - Tooling / docs
   - `scripts/run-api.ps1`
   - `scripts/send-rule-update.ps1`
@@ -244,16 +270,22 @@ Full topology: `docs/architecture-diagram.md`
 
 ### In Progress
 
-_Nothing. Phase 10 fully complete and Kubernetes-validated._
+1. Notification delivery validation
+   - update `realrisk-notification-secrets` with live SMTP and Slack webhook values
+   - restart `realrisk-alert-service`
+   - trigger a CRITICAL alert and confirm Slack + email receipt
 
 ### Next
 
-1. Notification delivery validation (deferred from Phase 9/10)
+1. Complete notification delivery validation
    - Populate `realrisk-notification-secrets` with live SMTP credentials and Slack webhook URL
    - Trigger a CRITICAL alert and verify email + Slack receipt end-to-end
    - Validate AlertManager receiver (PagerDuty / webhook) if routing rules are configured
-2. Phase 11 (to be specced)
-   - Candidates: API authentication/authorization (admin endpoints currently unauthenticated), rate-limit visibility API, Flink savepoint automation, prod overlay hardening
+2. Phase 11 closeout
+   - record final notification acceptance evidence
+   - decide whether to keep `ADMIN_API_KEY=dev-only-insecure` as local default or move to install-time-only override
+3. Phase 12 (to be specced)
+   - candidates: rate-limit visibility API, Flink savepoint automation, prod overlay hardening, alert-service autoscaling strategy
 
 ---
 
@@ -640,6 +672,8 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
 - GitHub CI: use `mvn` (system Maven), not `./.tools/maven/bin/mvn` — the `.tools` directory does not exist on GitHub runners
 - Phase 10 kind image loading: `docker tag <old> <new>` only re-labels; always run `docker build` first, then `kind load docker-image <new-tag>`, then `kubectl set image`; same-tag images in kind nodes are not evicted automatically
 - Phase 10 Redis Sentinel env var naming: apps expect standard Spring Boot names (`SPRING_DATA_REDIS_SENTINEL_MASTER` / `SPRING_DATA_REDIS_SENTINEL_NODES`); custom-named vars (e.g. `REDIS_SENTINEL_*`) are silently ignored and cause Spring to fall back to `localhost:6379`
+- Phase 11 first-hit `/events` after api-gateway rollout may transiently return `503 redis_unavailable` while Lettuce warms up Redis Sentinel connections; a retry succeeded and the steady-state acceptance result remained `202`
+- HPA existence is validated in local kind, but `ScalingActive=False` is expected when the cluster lacks `metrics-server` / `pods.metrics.k8s.io`; this does not invalidate the “HPA object present and wired” acceptance
 - `alert-service` packaging can fail if `alert-service-0.1.0-SNAPSHOT.jar` is locked by a running
   local process; stop the running jar before rebuilding the image layer
 - Long-lived `kubectl exec -it ... kafka-avro-console-consumer` sessions can exit with `137`
