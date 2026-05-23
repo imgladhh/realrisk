@@ -2,7 +2,7 @@
 
 > Living context for AI-assisted development sessions.
 > Update `Done`, `In Progress`, `Next`, and `Known Issues` at the end of each session.
-> Last updated: 2026-05-20 (Phase 11 auth and HPA acceptance recorded)
+> Last updated: 2026-05-23 (Phase 11 notification validation recorded)
 
 ---
 
@@ -261,6 +261,28 @@ Full topology: `docs/architecture-diagram.md`
     - `rules` table contains `p11-test` with `enabled = true` ✅
     - `POST /events` without token → `202 ACCEPTED` ✅
     - `kubectl get hpa -n realrisk` shows `realrisk-api-gateway-hpa` with `MINPODS=1`, `MAXPODS=3`, `REPLICAS=1` ✅
+  - Notification delivery validation (2026-05-23)
+    - `realrisk-notification-secrets` updated with:
+      - live Slack Incoming Webhook URL
+      - Gmail sender `hhuang1003@gmail.com`
+      - Gmail App Password (retried with a freshly regenerated value)
+    - `realrisk-alert-service-config` updated to:
+      - `SMTP_HOST=smtp.gmail.com`
+      - `SMTP_PORT=587`
+      - `SMTP_FROM=hhuang1003@gmail.com`
+    - `alert-service` restarted successfully after config changes ✅
+    - Three CRITICAL alerts forced via the reliable `velocity + large_amount` pattern:
+      - `user-phase11-notify`
+      - `user-phase11-notify-2`
+      - `user-phase11-notify-3`
+    - Slack delivery confirmed in `#all-realrisk`:
+      - messages received from the `realrisk` app
+      - payload included `severity=CRITICAL`, `userId`, and `reasonSummary=high_velocity_7d,large_amount` ✅
+    - Email delivery still failing:
+      - `EmailNotificationChannel` logs `Authentication failed`
+      - failure persists even after rotating the Gmail App Password
+      - email receipt therefore remains unverified ❌
+    - `alert_log` rows for all three users are present with `status=PROCESSED` ✅
 - Tooling / docs
   - `scripts/run-api.ps1`
   - `scripts/send-rule-update.ps1`
@@ -270,20 +292,19 @@ Full topology: `docs/architecture-diagram.md`
 
 ### In Progress
 
-1. Notification delivery validation
-   - update `realrisk-notification-secrets` with live SMTP and Slack webhook values
-   - restart `realrisk-alert-service`
-   - trigger a CRITICAL alert and confirm Slack + email receipt
+1. Gmail SMTP authentication troubleshooting
+   - Slack/push delivery is verified
+   - email delivery still fails with `Authentication failed`
+   - next step is to verify Gmail SMTP auth outside RealRisk (or switch to another SMTP provider) before retesting
 
 ### Next
 
-1. Complete notification delivery validation
-   - Populate `realrisk-notification-secrets` with live SMTP credentials and Slack webhook URL
-   - Trigger a CRITICAL alert and verify email + Slack receipt end-to-end
-   - Validate AlertManager receiver (PagerDuty / webhook) if routing rules are configured
+1. Complete email notification validation
+   - verify Gmail SMTP auth independently or swap to a simpler SMTP provider (Mailtrap / MailHog / provider mailbox)
+   - retest CRITICAL alert email delivery end-to-end
 2. Phase 11 closeout
-   - record final notification acceptance evidence
    - decide whether to keep `ADMIN_API_KEY=dev-only-insecure` as local default or move to install-time-only override
+   - consider whether `channels_notified` should represent attempted channels or only successful deliveries
 3. Phase 12 (to be specced)
    - candidates: rate-limit visibility API, Flink savepoint automation, prod overlay hardening, alert-service autoscaling strategy
 
@@ -674,6 +695,7 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
 - Phase 10 Redis Sentinel env var naming: apps expect standard Spring Boot names (`SPRING_DATA_REDIS_SENTINEL_MASTER` / `SPRING_DATA_REDIS_SENTINEL_NODES`); custom-named vars (e.g. `REDIS_SENTINEL_*`) are silently ignored and cause Spring to fall back to `localhost:6379`
 - Phase 11 first-hit `/events` after api-gateway rollout may transiently return `503 redis_unavailable` while Lettuce warms up Redis Sentinel connections; a retry succeeded and the steady-state acceptance result remained `202`
 - HPA existence is validated in local kind, but `ScalingActive=False` is expected when the cluster lacks `metrics-server` / `pods.metrics.k8s.io`; this does not invalidate the “HPA object present and wired” acceptance
+- Phase 11 notification validation showed that Slack delivery can succeed while email fails; `alert_log.channels_notified` still records `{email,sms,push}` even when `EmailNotificationChannel` logs `Authentication failed`, so the field currently reflects attempted/configured channels rather than confirmed successful deliveries
 - `alert-service` packaging can fail if `alert-service-0.1.0-SNAPSHOT.jar` is locked by a running
   local process; stop the running jar before rebuilding the image layer
 - Long-lived `kubectl exec -it ... kafka-avro-console-consumer` sessions can exit with `137`
