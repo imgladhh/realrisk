@@ -1,700 +1,117 @@
 # RealRisk
 
-Phase 1 implements the vertical slice from `ARCHITECTURE.md`; Phase 2 added
-Avro + Schema Registry on every Kafka boundary; Phase 3 adds Redis-backed user
-profile enrichment inside the Flink path:
+RealRisk is a payment risk pipeline with a fast synchronous gateway and a slower streaming risk engine.
 
-- API Gateway fast path: Redis blacklist check + Lua per-user rate limit
-- Kafka topics: `raw-events`, `raw-audit`, `decision-audit`, `high-risk-events`, `alert-events`
-- Audit writer: verbatim `raw-events` to `raw-audit`
-- Risk worker: async rule stub to `decision-audit`
-- Redis materializer: async blacklist projection from blocking decisions
-- PostgreSQL archivers: `raw_events` and `risk_decisions`
-- Avro contracts: `src/main/avro/RiskEventAvro.avsc`, `src/main/avro/RiskDecisionAvro.avsc`
-- Schema Registry: Confluent-compatible registry at `http://localhost:8081`
-- Flink profile enrichment: reads `blacklist:<userId>` and `velocity:count:7d:<userId>` from Redis
-- Alert Service module: independent Spring Boot consumer for `alert-events`
+- **API Gateway**: validates requests, checks Redis blacklist and rate limits, and publishes Avro events
+- **Flink job**: evaluates risk rules, enriches user profile data, and emits decisions and alerts
+- **Alert Service**: consumes `alert-events`, deduplicates alerts, and notifies configured channels
+- **PostgreSQL + Redis + Kafka**: persistence, state, and messaging backbone
 
-## Local Run
+The project now includes:
+
+- dynamic rule persistence and DB outbox publishing
+- in-cluster Kafka / Schema Registry / CloudNativePG / Redis Sentinel
+- DLQ replay tooling
+- admin API key protection for `/admin/**`
+- API Gateway HPA manifests
+- Slack and email notification paths validated end to end
+
+## Architecture
+
+- Main diagram: [ARCHITECTURE.md](ARCHITECTURE.md)
+- Topology notes: [docs/architecture-diagram.md](docs/architecture-diagram.md)
+
+## Repository Layout
+
+- [src](src) - API Gateway
+- [flink-job](flink-job) - streaming risk engine
+- [alert-service](alert-service) - alert consumer and notifier
+- [k8s](k8s) - base manifests and overlays
+- [scripts](scripts) - local build, install, and validation helpers
+- [memory.md](memory.md) - validated phase history and operational notes
+
+## Quick Start
+
+### Local Docker Compose path
 
 ```powershell
 docker compose up -d
 .\scripts\run-api.ps1
 ```
 
-To run the API Gateway while a Flink job owns async decisions, disable the Phase 1
-stub worker:
+If the Flink job owns async decisions, disable the old Spring stub worker:
 
 ```powershell
 .\scripts\run-api.ps1 -DisableRiskWorker
 ```
 
-Kafka messages are Avro-encoded and require Schema Registry. Check local registry
-connectivity with:
+### Kubernetes path
 
-```powershell
-Invoke-RestMethod http://localhost:8081/subjects
-```
-
-## Phase 2 Notes
-
-Apache Flink 2.1.2 is the current stable Flink line, but the official Flink 2.1
-Kafka connector documentation says there is no connector available yet for Flink
-2.1. The Flink job should therefore be introduced on the Flink 1.20.x connector
-line first, then upgraded once the 2.x Kafka connector catches up.
-
-## Flink Job
-
-The Phase 2 Flink job lives in [flink-job](E:/realRisk/flink-job) and consumes
-`raw-events` directly from Kafka using `RiskEventAvro`.
-
-Current behavior:
-
-- Writes one `RiskDecisionAvro` record per input event to `decision-audit`
-- Writes `HighRiskEventAvro` to `high-risk-events` for scores `>= 85`
-- Writes `AlertEventAvro` to `alert-events` for scores `>= 90`
-- Includes one cross-user sliding-window rule stub: the same merchant hit by
-  `10` distinct users within `5` minutes
-- Reads a per-user Redis profile before scoring:
-  - `blacklist:<userId>` -> adds `blacklisted_user` with `+100`
-  - `velocity:count:7d:<userId>` -> adds `high_velocity_7d` when count exceeds the configured threshold
-- On a first start without checkpoints, the Kafka source begins at `latest` to
-  avoid replaying the entire retained `raw-events` backlog by accident
-- Rebuilds live rule parameters from the compacted `rule-updates` topic, which
-  is always replayed from `earliest` on a fresh start to repopulate broadcast state
-
-Build and test:
-
-```powershell
-mvn -f .\flink-job\pom.xml test
-mvn -f .\flink-job\pom.xml -DskipTests package
-```
-
-Run locally with the Spring stub disabled:
-
-```powershell
-$env:RISK_WORKER_ENABLED="false"
-$env:KAFKA_BOOTSTRAP_SERVERS="localhost:9092"
-$env:SCHEMA_REGISTRY_URL="http://localhost:8081"
-$env:RULE_UPDATES_TOPIC="rule-updates"
-java -jar .\flink-job\target\realrisk-flink-job-0.1.0-SNAPSHOT.jar
-```
-
-The shaded jar includes the Flink runtime needed for local `java -jar` execution.
-
-If Maven is not installed locally, run it through Docker:
-
-```powershell
-docker run --rm -v ${PWD}:/workspace -w /workspace maven:3.9-eclipse-temurin-21 mvn test
-```
-
-If Testcontainers cannot connect to Docker Desktop from the JVM, start Redis with Compose and
-point the Redis tests at it:
-
-```powershell
-docker compose up -d redis
-mvn -Drealrisk.test.redis.host=localhost -Drealrisk.test.redis.port=6379 test
-```
-
-To include the Redis Materializer audit-bans integration test, also start Postgres and pass
-its JDBC URL:
-
-```powershell
-docker compose up -d redis postgres
-mvn "-Drealrisk.test.redis.host=localhost" `
-    "-Drealrisk.test.redis.port=6379" `
-    "-Drealrisk.test.postgres.url=jdbc:postgresql://localhost:55432/realrisk" `
-    "-Drealrisk.test.postgres.user=realrisk" `
-    "-Drealrisk.test.postgres.password=realrisk" `
-    test
-```
-
-## Phase 2c: Dynamic Rule Channel
-
-Rules are managed through the compacted `rule-updates` Kafka topic. The Flink
-job replays the topic from `earliest` on every fresh start to rebuild broadcast
-state before processing any events. Changes take effect after the next Flink
-checkpoint (about 30 s).
-
-### Supported rule types
-
-| `ruleType` | Parameters | Effect |
-|---|---|---|
-| `large_amount` | `amount_cents` (long), `score_delta` | Flags transactions above the threshold |
-| `withdrawal_without_device` | `score_delta` | Flags deviceFp-less withdrawals |
-| `merchant_multi_user_burst` | `burst_threshold`, `score_delta` | Flags merchants hit by N distinct users in the burst window |
-| `high_velocity_7d` | `velocity_threshold`, `score_delta` | Flags users whose 7-day event count exceeds the threshold |
-| `global` | `review_threshold`, `block_threshold` | Overrides the decision boundaries |
-
-### Sending a rule update
-
-Use the helper script (requires `docker compose up -d` with
-`realrisk-schema-registry` running):
-
-```powershell
-# Raise the large-amount threshold to USD 30 000
-.\scripts\send-rule-update.ps1 `
-    -RuleId rule-large-amount-v1 `
-    -RuleType large_amount `
-    -Parameters @{ amount_cents = "3000000" }
-
-# Disable the rule - engine falls back to config default (USD 10 000)
-.\scripts\send-rule-update.ps1 `
-    -RuleId rule-large-amount-v1 `
-    -RuleType large_amount `
-    -Enabled $false
-```
-
----
-
-## E2E Verification: Dynamic Rule Channel
-
-This three-scenario sequence proves the full broadcast state -> decision pipeline.
-Run `docker compose up -d` and start the Flink job before beginning.
-
-**Terminal A** - watch decisions arriving on `decision-audit`:
-
-```bash
-docker exec -it realrisk-schema-registry \
-  kafka-avro-console-consumer \
-    --bootstrap-server kafka:29092 \
-    --topic decision-audit \
-    --from-beginning \
-    --property schema.registry.url=http://schema-registry:8081
-```
-
-### Scenario 1 - Default rules -> BLOCK
-
-Send an event with `amountCents=2000000` (above the 1 000 000-cent default):
-
-```powershell
-.\scripts\send-rule-update.ps1 `
-    -RuleId rule-large-amount-v1 `
-    -RuleType large_amount `
-    -Enabled $false          # ensure default is active (no override)
-```
-
-```bash
-# Terminal B - inside realrisk-schema-registry container
-EVENT_SCHEMA='{"type":"record","name":"RiskEventAvro","namespace":"com.realrisk.avro","fields":[{"name":"eventId","type":"string"},{"name":"requestId","type":"string"},{"name":"userId","type":"string"},{"name":"eventType","type":"string"},{"name":"timestamp","type":{"type":"long","logicalType":"timestamp-millis"}},{"name":"amountCents","type":"long"},{"name":"currency","type":"string"},{"name":"ipAddress","type":["null","string"],"default":null},{"name":"deviceFp","type":["null","string"],"default":null},{"name":"merchantId","type":["null","string"],"default":null},{"name":"counterparty","type":["null","string"],"default":null},{"name":"source","type":"string"}]}'
-echo '{"eventId":"evt-e2e-01","requestId":"req-e2e-01","userId":"user-e2e-01","eventType":"TRANSACTION","timestamp":1747224300000,"amountCents":2000000,"currency":"USD","ipAddress":null,"deviceFp":{"string":"device-e2e-01"},"merchantId":{"string":"merchant-e2e-01"},"counterparty":null,"source":"api-gateway"}' | \
-kafka-avro-console-producer \
-  --bootstrap-server kafka:29092 \
-  --topic raw-events \
-  --property schema.registry.url=http://schema-registry:8081 \
-  --property value.schema="$EVENT_SCHEMA"
-```
-
-Expected (within 30 s): `"eventId":"evt-e2e-01","decision":"BLOCK","riskScore":80,"reasons":["large_amount"]`
-
-### Scenario 2 - Dynamic threshold raise -> ALLOW
-
-Raise the threshold to 3 000 000 cents, then send the same amount:
-
-```powershell
-.\scripts\send-rule-update.ps1 `
-    -RuleId rule-large-amount-v1 `
-    -RuleType large_amount `
-    -Parameters @{ amount_cents = "3000000" }
-```
-
-Wait about 10 s, then send `evt-e2e-02` (same `amountCents=2000000`, new `eventId`).
-
-Expected: `"eventId":"evt-e2e-02","decision":"ALLOW","riskScore":0,"reasons":[]`
-
-### Scenario 3 - Disable rule -> BLOCK restored
-
-```powershell
-.\scripts\send-rule-update.ps1 `
-    -RuleId rule-large-amount-v1 `
-    -RuleType large_amount `
-    -Enabled $false
-```
-
-Wait about 10 s, then send `evt-e2e-03`.
-
-Expected: `"eventId":"evt-e2e-03","decision":"BLOCK","riskScore":80,"reasons":["large_amount"]`
-
----
-
-## Phase 3: Redis User Profile Enrichment
-
-The Flink job now enriches every event with a lightweight Redis-backed profile
-before scoring.
-
-### Redis keys
-
-| Key | Type | Meaning |
-|---|---|---|
-| `blacklist:<userId>` | string | Any value means the user is blacklisted |
-| `velocity:count:7d:<userId>` | string integer | User's 7-day event count |
-
-### New rules
-
-| Rule | Trigger | Default score |
-|---|---|---|
-| `blacklisted_user` | `blacklist:<userId>` exists | `+100` |
-| `high_velocity_7d` | `velocity:count:7d:<userId> >= 100` | `+40` |
-
-### Local config defaults
-
-| Env var | Default |
-|---|---|
-| `REDIS_HOST` | `localhost` |
-| `REDIS_PORT` | `6379` |
-| `FLINK_VELOCITY_THRESHOLD_7D` | `100` |
-| `FLINK_HIGH_VELOCITY_SCORE` | `40` |
-
-Redis read failures are intentionally fail-open inside Flink for this phase:
-the job falls back to an empty profile and keeps processing.
-
-### Manual Redis setup for local testing
-
-```powershell
-docker exec realrisk-redis redis-cli SET blacklist:user-phase3 1
-docker exec realrisk-redis redis-cli SET velocity:count:7d:user-phase3 125
-docker exec realrisk-redis redis-cli DEL blacklist:user-phase3
-docker exec realrisk-redis redis-cli DEL velocity:count:7d:user-phase3
-```
-
-### Minimal E2E checks
-
-1. Start local infra, Spring API, and the Flink job.
-2. Wait until the Flink terminal shows stable checkpoint logs before sending test events.
-   `raw-events` currently starts from `latest()` on a fresh Flink consumer group, so
-   events produced before the new job is fully running will be skipped by design.
-3. Seed Redis for a test user:
-
-```powershell
-docker exec realrisk-redis redis-cli SET blacklist:user-phase3 1
-docker exec realrisk-redis redis-cli SET velocity:count:7d:user-phase3 125
-```
-
-4. Send a raw event for `user-phase3` with a brand-new `eventId`.
-5. Watch `decision-audit`.
-
-Expected result:
-
-- decision: `BLOCK`
-- reasons include `blacklisted_user` and `high_velocity_7d`
-
-6. Clear the blacklist key but keep velocity:
-
-```powershell
-docker exec realrisk-redis redis-cli DEL blacklist:user-phase3
-```
-
-Expected next result for the same user with a new `eventId`:
-
-- decision reflects remaining rules only
-- reasons still include `high_velocity_7d`
-- validated locally with:
-  - `velocity:count:7d:user-e2e-04 = 125`
-  - `evt-e2e-04f` -> `ALLOW / 40 / ["high_velocity_7d"]`
-
-7. Clear velocity too:
-
-```powershell
-docker exec realrisk-redis redis-cli DEL velocity:count:7d:user-phase3
-```
-
-Expected next result:
-
-- profile-derived reasons disappear
-- only event-driven rules remain
-
-### Local testing note
-
-During Phase 3 E2E we confirmed that a fresh Flink restart plus
-`OffsetsInitializer.latest()` can make an otherwise valid test look broken if the
-Kafka test event is produced too early. The safe sequence is:
-
-1. start Flink
-2. wait for checkpoint logs
-3. produce a new event with a never-before-used `eventId`
-
-If `raw-events` shows the message but `decision-audit` does not, first confirm the
-event was produced after the current Flink job started.
-
-We also validated the blacklist-only path locally after a clean Flink restart:
-
-- `blacklist:user-e2e-04 = 1`
-- `evt-e2e-04e` -> `BLOCK / 100 / ["blacklisted_user"]`
-
----
-
-## Phase 4: Alert Service
-
-`alert-service/` is a standalone Spring Boot module that consumes `AlertEventAvro`
-from `alert-events` using its own Kafka consumer group, `alert-service`.
-
-Current behavior:
-
-- Deduplicates on `alertId` via PostgreSQL `alert_log`
-- Applies per-user per-severity rate limiting in Redis:
-  - `alert:ratelimit:<userId>:<severity>`
-- Routes notifications by config:
-  - `MEDIUM` -> email
-  - `HIGH` -> email + sms
-  - `CRITICAL` -> email + sms + push
-- Uses logging stubs for all channels in this phase
-
-Build and test:
-
-```powershell
-.\.tools\maven\bin\mvn.cmd -f .\alert-service\pom.xml test
-.\.tools\maven\bin\mvn.cmd -f .\alert-service\pom.xml -DskipTests package
-```
-
-Current verification:
-
-- alert-service unit tests pass
-- Kafka -> PostgreSQL integration test is implemented with Testcontainers
-- In this local Codex JVM environment the integration test auto-skips when Docker is not visible
-- Local smoke test validated:
-  - published `alert-e2e-01` with `severity=HIGH`
-  - `alert_log` row persisted as `PROCESSED`
-  - `channels_notified = {email,sms}`
-  - Redis rate-limit key `alert:ratelimit:user-alert-01:HIGH` was set to `1`
-
-### Phase 4 smoke test result
-
-Locally validated with:
-
-- `alertId = alert-e2e-01`
-- `userId = user-alert-01`
-- `severity = HIGH`
-- expected routing: `email + sms` only
-
-Observed PostgreSQL row:
-
-```text
-alert_id     = alert-e2e-01
-user_id      = user-alert-01
-severity     = HIGH
-status       = PROCESSED
-channels     = {email,sms}
-reason       = large_amount,blacklisted_user
-```
-
-Observed Redis rate-limit state:
-
-```text
-alert:ratelimit:user-alert-01:HIGH = 1
-```
-
----
-
-## Phase 5: Kubernetes Deployment Scaffold
-
-Phase 5 adds a Kubernetes-first deployment layout while intentionally keeping
-Kafka, Schema Registry, Redis, and PostgreSQL on Docker Compose for now.
-
-### What is included
-
-- `Dockerfile.api-gateway`
-- `alert-service/Dockerfile`
-- `flink-job/Dockerfile`
-- `k8s/base/`
-  - `api-gateway/` Deployment + Service + ConfigMap
-  - `alert-service/` Deployment + Service + ConfigMap
-  - `flink/` FlinkDeployment CRD + ServiceAccount + ConfigMap
-  - `minio/` Deployment + Service + PVC + bucket-init Job
-- `k8s/overlays/local/`
-  - local namespace
-  - dev Secrets
-  - host-based overrides for Compose-backed infra
-- `k8s/overlays/prod/`
-  - resource and endpoint placeholders for a production-like layout
-- helper scripts:
-  - `scripts/build-k8s-images.ps1`
-  - `scripts/kind-load-images.ps1`
-  - `scripts/install-flink-operator.ps1`
-
-### Important local networking note
-
-Kubernetes pods cannot use the plain `localhost:9092` Kafka listener from the
-host. `docker-compose.yml` now exposes an extra broker listener for local
-cluster workloads:
-
-- Kafka for Kubernetes pods: `host.docker.internal:19092`
-
-The local overlay is already wired to use:
-
-- Kafka: `host.docker.internal:19092`
-- Schema Registry: `http://host.docker.internal:8081`
-- Redis: `host.docker.internal:6379`
-- PostgreSQL: `host.docker.internal:55432`
-
-### Build images for Kubernetes
-
-```powershell
-.\scripts\build-k8s-images.ps1
-```
-
-Default image tags:
-
-- `realrisk-api:phase5`
-- `realrisk-alert-service:phase5`
-- `realrisk-flink:phase5`
-
-### Load images into kind
-
-```powershell
-.\scripts\kind-load-images.ps1
-```
-
-### Install the Flink Kubernetes Operator
-
-```powershell
-.\scripts\install-flink-operator.ps1
-```
-
-This uses the official Helm chart and disables the webhook for a lighter-weight
-local install.
-
-### Render or apply the local overlay
-
-Render:
-
-```powershell
-kubectl kustomize .\k8s\overlays\local
-```
-
-Apply:
-
-```powershell
-kubectl apply -k .\k8s\overlays\local
-```
-
-### Access the Flink JobManager UI
-
-After the `FlinkDeployment` is running, port-forward the operator-created REST
-service:
-
-```powershell
-kubectl -n realrisk port-forward svc/realrisk-flink-rest 8082:8081
-```
-
-Then open [http://localhost:8082](http://localhost:8082).
-
-### Current validation level
-
-Phase 5 has now been validated on a local `kind` cluster:
-
-- `kubectl kustomize .\k8s\overlays\local` renders successfully
-- `kubectl kustomize .\k8s\overlays\prod` renders successfully
-- Flink K8s Operator installed successfully through Helm
-- local images were built and loaded into `kind`
-- `kubectl apply -k .\k8s\overlays\local` brought up:
-  - `realrisk-api-gateway`
-  - `realrisk-alert-service`
-  - `realrisk-minio`
-  - `realrisk-flink` plus TaskManagers
-- Flink checkpoints were written to MinIO under:
-  - `realrisk-flink/checkpoints/...`
-- K8s Flink E2E validated:
-  - `evt-k8s-04` -> `BLOCK / 80 / ["large_amount"]`
-- K8s alert path validated:
-  - `evt-k8s-alert-01` -> `BLOCK / 100 / ["blacklisted_user"]`
-  - corresponding `alert_log` row persisted with:
-    - `user_id = user-k8s-alert`
-    - `severity = CRITICAL`
-    - `status = PROCESSED`
-    - `channels_notified = {email,sms,push}`
-
-The remaining Phase 5 follow-up is documentation and operational polish rather
-than basic functionality.
-
-## Phase 6: In-Cluster Kafka and Infra
-
-Phase 6 removes the Kubernetes-to-Docker host bridge from the main path and
-moves the remaining shared infrastructure into the cluster:
-
-- Kafka via Strimzi (`Kafka` + `KafkaTopic` CRs)
-- Schema Registry as a Kubernetes `Deployment`
-- Redis via Bitnami Helm chart
-- PostgreSQL via Bitnami Helm chart
-
-### What is included
-
-- `k8s/base/kafka/`
-  - `Kafka` cluster CR
-  - `KafkaNodePool` for local KRaft dual-role nodes
-  - `KafkaTopic` CRs for:
-    - `raw-events`
-    - `raw-audit`
-    - `decision-audit`
-    - `high-risk-events`
-    - `alert-events`
-    - `rule-updates`
-- `k8s/base/schema-registry/`
-  - Schema Registry `Deployment` + `Service`
-- Helm values:
-  - `k8s/overlays/local/helm-values/redis-values.yaml`
-  - `k8s/overlays/local/helm-values/postgres-values.yaml`
-  - `k8s/overlays/prod/helm-values/redis-values.yaml`
-  - `k8s/overlays/prod/helm-values/postgres-values.yaml`
-- `scripts/install-infra.ps1`
-
-### In-cluster service addresses
-
-The local and prod overlays now target Kubernetes DNS names instead of
-`host.docker.internal`:
-
-- Kafka: `realrisk-kafka-kafka-bootstrap.realrisk.svc.cluster.local:9092`
-- Schema Registry: `http://realrisk-schema-registry.realrisk.svc.cluster.local:8081`
-- Redis: `realrisk-redis-master.realrisk.svc.cluster.local:6379`
-- PostgreSQL: `realrisk-postgresql.realrisk.svc.cluster.local:5432`
-
-### Install infra for local validation
+Use the helper scripts and manifests under `k8s/`:
 
 ```powershell
 .\scripts\install-infra.ps1 -Overlay local
+.\scripts\install-flink-operator.ps1
+.\scripts\install-monitoring.ps1
 kubectl apply -k .\k8s\overlays\local
-kubectl wait kafka/realrisk-kafka --for=condition=Ready -n realrisk --timeout=300s
 ```
 
-`install-infra.ps1` installs:
+## Core Flows
 
-- `strimzi-kafka-operator`
-- `realrisk-redis`
-- `realrisk-postgresql`
+### Event ingest
 
-The Strimzi operator chart version is pinned in `install-infra.ps1` so CRD/API
-behavior stays stable across repeated installs. The script also sets
-`STRIMZI_KUBERNETES_VERSION` on the operator deployment based on the current
-cluster version to avoid newer Kubernetes `VersionInfo` parsing regressions. The
-operator is installed with `watchAnyNamespace=true` so a cluster operator in
-`strimzi-system` can reconcile the `Kafka` and `KafkaTopic` CRs created in the
-`realrisk` application namespace.
+`POST /events` enters the fast path:
 
-### Expected startup timing
+1. Redis blacklist and per-user rate limit
+2. Avro publish to `raw-events`
+3. Flink consumes and emits:
+   - `decision-audit`
+   - `high-risk-events`
+   - `alert-events`
 
-After `kubectl apply`, the Strimzi operator still needs time to create the Kafka
-cluster itself. During that window:
+### Dynamic rules
 
-- `KafkaTopic` resources may remain pending
-- Schema Registry may temporarily fail to connect and restart
+Rules live in PostgreSQL and are published through the transactional outbox to the compacted `rule-updates` topic. Flink replays `rule-updates` to rebuild broadcast state and apply live rule changes.
 
-That is expected on a fresh local cluster. Wait for the `Kafka` CR to become
-Ready before judging Schema Registry health:
+### Alerts
 
-```powershell
-kubectl wait kafka/realrisk-kafka --for=condition=Ready -n realrisk --timeout=300s
-```
+`alert-service` consumes `alert-events`, stores deduplicated alert rows in `alert_log`, and sends notifications to:
 
-### Current validation level
+- Slack / webhook
+- email
+- SMS stub
 
-Phase 6 has now been validated on a local cluster:
+## Useful Scripts
 
-- `kubectl kustomize .\k8s\overlays\local` renders successfully
-- `kubectl kustomize .\k8s\overlays\prod` renders successfully
-- app ConfigMaps use in-cluster DNS instead of host bridges
-- Strimzi Kafka and `KafkaTopic` CRs are part of the base overlay
-- Schema Registry runs inside Kubernetes
-- Redis and PostgreSQL run inside Kubernetes via Helm
-- all declared `KafkaTopic` resources became `READY=True`
-- KRaft Kafka cluster became `Ready`
-- in-cluster Flink consumed from in-cluster Kafka and produced to `decision-audit`
-- in-cluster alert path persisted to PostgreSQL `alert_log`
+- [scripts/run-api.ps1](scripts/run-api.ps1) - run the API Gateway locally
+- [scripts/send-rule-update.ps1](scripts/send-rule-update.ps1) - emergency direct Kafka rule update path
+- [scripts/replay-dlq.ps1](scripts/replay-dlq.ps1) - replay alert DLQ messages in-cluster
+- [scripts/install-infra.ps1](scripts/install-infra.ps1) - install Strimzi, Redis, CNPG, and notification/admin secrets
+- [scripts/install-monitoring.ps1](scripts/install-monitoring.ps1) - install kube-prometheus-stack
+- [scripts/build-k8s-images.ps1](scripts/build-k8s-images.ps1) - build local images
+- [scripts/kind-load-images.ps1](scripts/kind-load-images.ps1) - load images into kind
+- [scripts/register-schemas.ps1](scripts/register-schemas.ps1) - register Avro schemas
 
-Validated examples:
+## Status
 
-- `evt-phase6-05` -> `decision-audit`
-  - `decision = BLOCK`
-  - `riskScore = 80`
-  - `reasons = ["large_amount"]`
-- `evt-phase6-alert-01` -> `alert_log`
-  - `user_id = user-phase6-alert`
-  - `severity = CRITICAL`
-  - `status = PROCESSED`
-  - `channels_notified = {email,sms,push}`
-  - `reason_summary = blacklisted_user`
+The system has been validated through:
 
-### Local mode note
+- dynamic rules and outbox publishing
+- CNPG failover
+- Redis Sentinel failover
+- broker-side Kafka lag alerting
+- DLQ replay
+- admin API key auth
+- API Gateway HPA wiring
+- Slack delivery
+- email delivery via Mailtrap
 
-The local Phase 6 Kafka deployment now uses **KRaft** with a single dual-role
-`KafkaNodePool` instead of single-node ZooKeeper. This avoids a local-only
-single-replica ZooKeeper failure mode observed during validation and aligns the
-dev topology more closely with Kafka's forward path.
+See [memory.md](memory.md) for the full validated history and known operational gotchas.
 
-### Phase 6 local validation pitfalls
+## Detailed Docs
 
-These were all hit during the first end-to-end validation and are worth keeping
-in mind for future local runs:
+The README keeps the main path only. Detailed runbooks and examples live here:
 
-1. **Strimzi / Kubernetes version compatibility**
-   - On Kubernetes `1.35`, older Strimzi/Fabric8 startup can fail while parsing
-     `VersionInfo` (for example around `emulationMajor`).
-   - `scripts/install-infra.ps1` now mitigates this by:
-     - pinning Strimzi `0.45.2`
-     - setting `STRIMZI_KUBERNETES_VERSION` from `kubectl version`
+- [docs/developer-guide.md](docs/developer-guide.md) - local run, Flink run, rules, alerts, and K8s workflow details
+- [memory.md](memory.md) - phase-by-phase validation evidence
 
-2. **Namespace watch scope matters**
-   - The Strimzi operator is installed in `strimzi-system`
-   - The `Kafka` and `KafkaTopic` CRs live in `realrisk`
-   - The install script therefore enables `watchAnyNamespace=true`
-
-3. **Kafka version must match the Strimzi line**
-   - The local `Kafka` CR now uses `3.9.2`
-   - Earlier values such as `3.7.1` were rejected by the current operator
-
-4. **Local Phase 6 uses KRaft, not ZooKeeper**
-   - Single-node ZooKeeper hit a local runtime failure during validation
-   - If Kafka stalls and only ZooKeeper pods appear, verify the manifests still
-     use the KRaft `KafkaNodePool` layout
-
-5. **Schema Registry bootstrap format is plain host:port**
-   - `SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS` should be:
-     - `realrisk-kafka-kafka-bootstrap:9092`
-   - Do not prefix it with `PLAINTEXT://`
-
-6. **Restart Flink after switching infra generations**
-   - If Kafka endpoints or ConfigMaps change, existing Flink pods may still be
-     connected to the old cluster
-   - Recreate the Flink JobManager pod so the deployment picks up the latest
-     ConfigMap values
-
-7. **Use in-cluster validation commands for Phase 6**
-   - Compose-based consumers/producers (`docker exec realrisk-schema-registry ...`)
-     talk to the old Docker Kafka path, not the in-cluster Kafka path
-   - For Phase 6 validation, run Kafka CLI commands inside the Kubernetes
-     Schema Registry pod with:
-     - `--bootstrap-server realrisk-kafka-kafka-bootstrap:9092`
-     - `--property schema.registry.url=http://realrisk-schema-registry:8081`
-
-8. **PowerShell and long-lived `kubectl exec` can be misleading**
-   - PowerShell may try to expand `$(...)` locally before it reaches the pod
-   - Long-running `kubectl exec -it ... kafka-avro-console-consumer` sessions
-     may exit with `137`; one-shot produce/consume checks are often more stable
-
-### Phase 6 validation sequence
-
-For the cleanest local verification flow:
-
-1. `.\scripts\install-infra.ps1 -Overlay local`
-2. `kubectl apply -k .\k8s\overlays\local`
-3. `kubectl wait kafka/realrisk-kafka --for=condition=Ready -n realrisk --timeout=300s`
-4. `kubectl get kafkatopic -n realrisk`
-   - all topics should show `READY=True`
-5. confirm Schema Registry is `1/1 Running`
-6. recreate the Flink JobManager pod once after the Phase 6 Kafka cutover
-7. run produce/consume checks from inside the Kubernetes Schema Registry pod
-
----
-
-## Ingest Example
-
-```powershell
-Invoke-RestMethod -Method Post http://localhost:8080/events `
-  -ContentType "application/json" `
-  -Body '{
-    "requestId":"req-1",
-    "userId":"user-123",
-    "eventType":"TRANSACTION",
-    "amountCents":1200,
-    "currency":"USD",
-    "source":"manual"
-  }'
-```
