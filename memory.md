@@ -2,7 +2,7 @@
 
 > Living context for AI-assisted development sessions.
 > Update `Done`, `In Progress`, `Next`, and `Known Issues` at the end of each session.
-> Last updated: 2026-05-23 (Phase 11 notification validation recorded)
+> Last updated: 2026-05-23 (Phase 11 notification validation completed with Mailtrap)
 
 ---
 
@@ -278,10 +278,22 @@ Full topology: `docs/architecture-diagram.md`
     - Slack delivery confirmed in `#all-realrisk`:
       - messages received from the `realrisk` app
       - payload included `severity=CRITICAL`, `userId`, and `reasonSummary=high_velocity_7d,large_amount` ✅
-    - Email delivery still failing:
-      - `EmailNotificationChannel` logs `Authentication failed`
-      - failure persists even after rotating the Gmail App Password
-      - email receipt therefore remains unverified ❌
+    - Gmail SMTP path failed independently of RealRisk code:
+      - `EmailNotificationChannel` logged `Authentication failed`
+      - failure persisted even after rotating the Gmail App Password
+      - conclusion: Gmail rejection was treated as an external account / SMTP policy issue, not a code defect
+    - Mailtrap fallback validation completed:
+      - `realrisk-notification-secrets` updated with Mailtrap password
+      - `realrisk-alert-service-config` updated to:
+        - `SMTP_HOST=sandbox.smtp.mailtrap.io`
+        - `SMTP_PORT=2525`
+        - `SPRING_MAIL_USERNAME=<mailtrap username>`
+        - `SMTP_FROM=realrisk@example.com`
+      - `alert-service` restarted successfully ✅
+      - new CRITICAL alert forced for `user-phase11-notify-4`
+      - `EmailNotificationChannel` logged successful delivery:
+        - `EMAIL alertId=626d2c85-bfe7-3826-beb1-f9a16719bca2 userId=user-phase11-notify-4 severity=CRITICAL ...`
+      - conclusion: email delivery code path is validated end-to-end with Mailtrap ✅
     - `alert_log` rows for all three users are present with `status=PROCESSED` ✅
 - Tooling / docs
   - `scripts/run-api.ps1`
@@ -292,16 +304,13 @@ Full topology: `docs/architecture-diagram.md`
 
 ### In Progress
 
-1. Gmail SMTP authentication troubleshooting
-   - Slack/push delivery is verified
-   - email delivery still fails with `Authentication failed`
-   - next step is to verify Gmail SMTP auth outside RealRisk (or switch to another SMTP provider) before retesting
+_Nothing. Phase 11 core hardening complete; Gmail-specific SMTP validation remains optional ops follow-up._
 
 ### Next
 
-1. Complete email notification validation
-   - verify Gmail SMTP auth independently or swap to a simpler SMTP provider (Mailtrap / MailHog / provider mailbox)
-   - retest CRITICAL alert email delivery end-to-end
+1. Optional Gmail follow-up
+   - verify Gmail SMTP auth outside RealRisk if Gmail must be supported directly in local/dev validation
+   - otherwise keep Mailtrap as the preferred test SMTP target
 2. Phase 11 closeout
    - decide whether to keep `ADMIN_API_KEY=dev-only-insecure` as local default or move to install-time-only override
    - consider whether `channels_notified` should represent attempted channels or only successful deliveries
@@ -696,6 +705,7 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
 - Phase 11 first-hit `/events` after api-gateway rollout may transiently return `503 redis_unavailable` while Lettuce warms up Redis Sentinel connections; a retry succeeded and the steady-state acceptance result remained `202`
 - HPA existence is validated in local kind, but `ScalingActive=False` is expected when the cluster lacks `metrics-server` / `pods.metrics.k8s.io`; this does not invalidate the “HPA object present and wired” acceptance
 - Phase 11 notification validation showed that Slack delivery can succeed while email fails; `alert_log.channels_notified` still records `{email,sms,push}` even when `EmailNotificationChannel` logs `Authentication failed`, so the field currently reflects attempted/configured channels rather than confirmed successful deliveries
+- For local/dev SMTP validation, Mailtrap is a cleaner acceptance target than Gmail because it separates application correctness from consumer-account authentication policy; Gmail failures in this phase were not treated as application defects once Mailtrap delivery succeeded
 - `alert-service` packaging can fail if `alert-service-0.1.0-SNAPSHOT.jar` is locked by a running
   local process; stop the running jar before rebuilding the image layer
 - Long-lived `kubectl exec -it ... kafka-avro-console-consumer` sessions can exit with `137`
