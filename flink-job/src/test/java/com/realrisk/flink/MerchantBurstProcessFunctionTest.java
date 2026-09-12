@@ -77,4 +77,12 @@ class MerchantBurstProcessFunctionTest {
     assertThat(MerchantBurstProcessFunction.RULE_STATE_DESCRIPTOR.getValueSerializer())
         .isInstanceOf(AvroSerializer.class);
   }
+
+  @Test
+  void bootstrapCompletesOnlyAfterStartupEndOffsetIsConsumed() {
+    assertThat(MerchantBurstProcessFunction.completesBootstrap(6L, 8L)).isFalse();
+    assertThat(MerchantBurstProcessFunction.completesBootstrap(7L, 8L)).isTrue();
+    assertThat(MerchantBurstProcessFunction.completesBootstrap(8L, 8L)).isTrue();
+    assertThat(MerchantBurstProcessFunction.completesBootstrap(0L, 0L)).isFalse();
+  }
 }

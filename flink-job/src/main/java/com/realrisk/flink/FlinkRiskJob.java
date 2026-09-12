@@ -6,6 +6,13 @@ import com.realrisk.avro.RiskDecisionAvro;
 import com.realrisk.avro.RiskEventAvro;
 import com.realrisk.avro.RuleUpdateAvro;
 import java.util.Map;
+import java.util.List;
+import java.util.Properties;
+import java.util.concurrent.TimeUnit;
+import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.OffsetSpec;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.source.KafkaSource;
@@ -29,23 +36,27 @@ public final class FlinkRiskJob {
     StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
     configureEnvironment(env, config);
 
+    long ruleBootstrapEndOffset = ruleBootstrapEndOffset(config);
+
     DataStream<RiskEventAvro> rawEvents =
         env.fromSource(rawEventsSource(config), watermarkStrategy(config), "raw-events-source");
 
-    // rule-updates is a compact topic: always replay from earliest so broadcast state is
-    // fully populated before any raw-events are processed on fresh start.
-    BroadcastStream<RuleUpdateAvro> broadcastRules =
+    // The source replays from earliest. MerchantBurstProcessFunction buffers raw events until it
+    // has consumed every rule record that existed at job submission time.
+    BroadcastStream<RuleUpdateEnvelope> broadcastRules =
         env.fromSource(
                 ruleUpdatesSource(config),
                 WatermarkStrategy.noWatermarks(),
                 "rule-updates-source")
-            .broadcast(MerchantBurstProcessFunction.RULE_STATE_DESCRIPTOR);
+            .broadcast(
+                MerchantBurstProcessFunction.RULE_STATE_DESCRIPTOR,
+                MerchantBurstProcessFunction.RULE_READINESS_DESCRIPTOR);
 
     SingleOutputStreamOperator<RiskDecisionAvro> decisionAuditEvents =
         rawEvents
             .keyBy(FlinkRiskJob::merchantKey)
             .connect(broadcastRules)
-            .process(new MerchantBurstProcessFunction(config))
+            .process(new MerchantBurstProcessFunction(config, ruleBootstrapEndOffset))
             .returns(new AvroTypeInfo<>(RiskDecisionAvro.class))
             .name("merchant-burst-evaluator");
 
@@ -96,8 +107,8 @@ public final class FlinkRiskJob {
         .build();
   }
 
-  private static KafkaSource<RuleUpdateAvro> ruleUpdatesSource(FlinkRiskJobConfig config) {
-    return KafkaSource.<RuleUpdateAvro>builder()
+  private static KafkaSource<RuleUpdateEnvelope> ruleUpdatesSource(FlinkRiskJobConfig config) {
+    return KafkaSource.<RuleUpdateEnvelope>builder()
         .setBootstrapServers(config.bootstrapServers())
         .setTopics(config.ruleUpdatesTopic())
         .setGroupId("flink-risk-engine-rules")
@@ -107,12 +118,30 @@ public final class FlinkRiskJob {
         .setStartingOffsets(OffsetsInitializer.earliest())
         .setProperty("isolation.level", "read_committed")
         .setDeserializer(
-            KafkaRecordDeserializationSchema.valueOnly(
-                ConfluentRegistryAvroDeserializationSchema.forSpecific(
-                    RuleUpdateAvro.class,
-                    config.schemaRegistryUrl(),
-                    schemaRegistryConfig(config))))
+            new RuleUpdateKafkaDeserializationSchema(
+                config.schemaRegistryUrl(), schemaRegistryConfig(config)))
         .build();
+  }
+
+  static long ruleBootstrapEndOffset(FlinkRiskJobConfig config) throws Exception {
+    Properties properties = new Properties();
+    properties.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, config.bootstrapServers());
+    try (Admin admin = Admin.create(properties)) {
+      var description =
+          admin.describeTopics(List.of(config.ruleUpdatesTopic()))
+              .allTopicNames()
+              .get(10, TimeUnit.SECONDS)
+              .get(config.ruleUpdatesTopic());
+      if (description == null || description.partitions().size() != 1) {
+        throw new IllegalStateException(
+            "rule-updates must have exactly one partition for ordered bootstrap");
+      }
+      TopicPartition partition = new TopicPartition(config.ruleUpdatesTopic(), 0);
+      return admin.listOffsets(Map.of(partition, OffsetSpec.latest()))
+          .partitionResult(partition)
+          .get(10, TimeUnit.SECONDS)
+          .offset();
+    }
   }
 
   private static WatermarkStrategy<RiskEventAvro> watermarkStrategy(FlinkRiskJobConfig config) {

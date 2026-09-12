@@ -33,7 +33,7 @@ public class KafkaConfig {
 
   @Bean
   NewTopic ruleUpdatesTopic(RiskProperties properties) {
-    return TopicBuilder.name(properties.topics().ruleUpdates()).partitions(4).replicas(1).compact().build(); // dev only; production must be >=3
+    return TopicBuilder.name(properties.topics().ruleUpdates()).partitions(1).replicas(1).compact().build(); // dev only; production must be >=3
   }
 
   @Bean

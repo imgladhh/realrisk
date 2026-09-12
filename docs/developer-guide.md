@@ -63,6 +63,26 @@ If Maven is not installed locally, use the repo-local binary:
 
 ## Dynamic Rules
 
+The persisted Kubernetes path separates rule writes from outbox publication:
+
+- API Gateway has `RULE_OUTBOX_PUBLISHER_ENABLED=false` and may scale horizontally.
+- `realrisk-rule-outbox-relay` is the only publisher. It has one replica and uses `Recreate`, so a
+  rollout cannot overlap old and new publishers.
+- The relay reads unpublished rows by ascending outbox ID and stops after the first publish failure.
+- `rule-updates` must remain one partition and updates must remain keyed by `ruleId`. Compaction is
+  used for state reconstruction, not as protection from concurrent stale writes.
+
+For local runs the relay component remains enabled in the main application by default. Use
+`RULE_OUTBOX_PUBLISHER_ENABLED=false` to disable it. `APPLICATION_WORKERS_ENABLED=false` disables
+the audit/archive/materializer consumers when the same application image is used for the dedicated
+relay pod.
+
+At Flink submission, the job reads the current end offset of the single `rule-updates` partition.
+A fresh job buffers at most 100 raw events per key until it consumes that offset; exceeding the
+bound fails the operator instead of evaluating against incomplete fallback rules. A valid checkpoint
+restore is immediately ready because broadcast state and Kafka source offsets restore together.
+Monitor `realrisk.rule_bootstrap_ready` (`0` waiting, `1` ready) on each evaluator subtask.
+
 Use the helper script for emergency direct Kafka rule updates:
 
 ```powershell
@@ -164,6 +184,7 @@ Note:
 - GitHub Actions uses `GITHUB_TOKEN` with `packages: write` for GHCR
 - deploy is manual (`workflow_dispatch`) because local kubeconfig targets are not appropriate for every push
 - `mvn -DskipTests package` still compiles test sources, so stale tests can still break image packaging
+- the test job explicitly runs `mvn -B -f ./flink-job/pom.xml verify` before image builds
 
 ## Where to Look Next
 

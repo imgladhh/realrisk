@@ -10,10 +10,15 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 @Component
+@ConditionalOnProperty(
+    name = "realrisk.application.workers-enabled",
+    havingValue = "true",
+    matchIfMissing = true)
 public class PgArchiver {
   private final JdbcTemplate jdbcTemplate;
 

@@ -2,7 +2,7 @@
 
 > Living context for AI-assisted development sessions.
 > Update `Done`, `In Progress`, `Next`, and `Known Issues` at the end of each session.
-> Last updated: 2026-09-11 (correctness remediation P0 completed)
+> Last updated: 2026-09-11 (correctness remediation P1 completed)
 
 ---
 
@@ -308,6 +308,28 @@ Full topology: `docs/architecture-diagram.md`
     - root application package build: passed ✅
   - full local root suite remains gated by the existing Docker-unavailable Redis Testcontainers
     issue tracked as P2 in `docs/reliability-remediation-spec.md`
+- Correctness remediation P1 (2026-09-11)
+  - Kubernetes outbox ownership moved to `realrisk-rule-outbox-relay`
+    - one replica plus `Recreate` prevents publisher overlap during rollout
+    - API Gateway replicas have the relay disabled
+    - audit/archive/materializer workers can be disabled when the API image runs as the relay
+    - ordering contract remains: blocking publish, ascending outbox ID, stop on first failure,
+      `ruleId` Kafka key, and one `rule-updates` partition
+  - Flink fresh-start rule readiness gate added
+    - submission captures the rule topic end offset and requires exactly one partition
+    - Kafka record metadata is retained in `RuleUpdateEnvelope`
+    - raw events are buffered in bounded keyed state until pre-existing rules are consumed
+    - buffer overflow fails the operator instead of evaluating with incomplete fallback rules
+    - `realrisk.rule_bootstrap_ready` exposes readiness per evaluator subtask
+    - checkpoint restores reuse consistent restored broadcast state and source offsets
+  - CI now runs `flink-job` verify and deploys/waits for the relay image
+  - validation:
+    - Flink verify and shaded package: 25 tests passed ✅
+    - relay plus targeted P0/root tests: passed ✅
+    - alert-service verify: 9 tests passed, 2 Docker integration tests skipped as designed ✅
+    - root offline package build: passed ✅
+    - local and production Kustomize rendering: passed ✅
+    - live Kubernetes rollout/E2E was not performed in this session
 - Tooling / docs
   - `scripts/run-api.ps1`
   - `scripts/send-rule-update.ps1`
@@ -317,15 +339,13 @@ Full topology: `docs/architecture-diagram.md`
 
 ### In Progress
 
-Correctness remediation is in progress. P0 is complete; P1 outbox relay ownership is next.
+Correctness remediation is in progress. P0 and P1 are complete; P2 remains.
 
 ### Next
 
-1. Implement P1 outbox ownership from `docs/reliability-remediation-spec.md`
-   - dedicated single-active relay is the preferred portfolio-project design
-   - preserve the single-partition, `ruleId` key, ascending-outbox-id ordering contract
-2. Implement the P1 Flink rule-bootstrap readiness gate
-3. Add Flink verification to CI, then address the two P2 test/documentation items
+1. Make Docker-dependent root tests skip predictably when Docker is unavailable while retaining CI
+   integration coverage.
+2. Document and test the deliberate Redis enrichment availability-first degradation policy.
 
 ---
 
@@ -698,6 +718,11 @@ That section now includes the full inline `RiskEventAvro` schema and does not de
 
 ## Known Issues / Watch List
 
+- `RuleUpdateEnvelope` is transported on the broadcast stream as a Flink generic/Kryo type; the
+  broadcast state itself remains explicitly typed with `AvroTypeInfo`, so this is a performance and
+  schema-evolution warning rather than a current state-correctness defect
+- The Flink bootstrap gate has boundary/unit coverage, but the complete buffer → rule-ready → flush
+  path has not yet been exercised by a Flink operator harness or a fresh-deployment E2E
 - Flink still logs `GenericType` info messages for some Avro fields such as `parameters` and `reasons`
   - not currently blocking
   - worth revisiting before production-hardening checkpoint/state guarantees

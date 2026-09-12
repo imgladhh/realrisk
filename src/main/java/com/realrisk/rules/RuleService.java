@@ -18,7 +18,6 @@ import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -132,7 +131,6 @@ public class RuleService {
         (rs, rowNum) -> mapRule(rs));
   }
 
-  @Scheduled(fixedDelayString = "${realrisk.rule-outbox.poll-interval-ms:5000}")
   public void publishPendingOutbox() {
     List<RuleOutboxEntry> pending =
         jdbcTemplate.query(

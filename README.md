@@ -9,7 +9,7 @@ RealRisk is a payment risk pipeline with a fast synchronous gateway and a slower
 
 The project now includes:
 
-- dynamic rule persistence and DB outbox publishing
+- dynamic rule persistence and a dedicated single-active DB outbox relay
 - in-cluster Kafka / Schema Registry / CloudNativePG / Redis Sentinel
 - DLQ replay tooling
 - admin API key protection for `/admin/**`
@@ -71,7 +71,16 @@ kubectl apply -k .\k8s\overlays\local
 
 ### Dynamic rules
 
-Rules live in PostgreSQL and are published through the transactional outbox to the compacted `rule-updates` topic. Flink replays `rule-updates` to rebuild broadcast state and apply live rule changes.
+Rules live in PostgreSQL. In Kubernetes, a dedicated one-replica relay with a `Recreate` rollout
+strategy publishes the transactional outbox in ascending ID order; API Gateway replicas never run
+the poller. The ordering contract also requires the compacted `rule-updates` topic to remain one
+partition and every message to be keyed by `ruleId`.
+
+On a fresh start, Flink captures the rule topic end offset and buffers raw events per key until the
+pre-existing rule history has been consumed. This prevents fallback rules from scoring events while
+broadcast state is incomplete. Valid checkpoint restores reuse the checkpointed rule state and
+source offsets. The Flink metric `realrisk.rule_bootstrap_ready` reports `0` while bootstrapping and
+`1` when evaluation is enabled.
 
 ### Alerts
 

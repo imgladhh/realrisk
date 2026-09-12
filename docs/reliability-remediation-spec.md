@@ -121,6 +121,16 @@ Choose one of the following designs; option A is preferred for this portfolio pr
 - `src/main/resources/db/migration/V4__rules_outbox.sql`
 - `k8s/base/api-gateway/hpa.yaml`
 
+### Implementation status
+
+Completed on 2026-09-11 with Option A. Scheduled polling now lives in a conditional
+`RuleOutboxRelay`; Kubernetes disables it on API Gateway replicas and enables it only in the
+dedicated one-replica `realrisk-rule-outbox-relay` Deployment. `Recreate` prevents rollout overlap.
+The existing blocking publisher, ascending-ID query, stop-on-first-failure behavior, `ruleId` key,
+and single-partition topic form the ordering contract. Unit tests cover relay delegation, disabling
+the relay bean on API Gateway replicas, and the existing failure/order behavior; local and
+production Kustomize overlays render successfully.
+
 ## P1 — Flink must not score against incomplete rule state at fresh startup
 
 ### Current behavior
@@ -147,6 +157,17 @@ Choose one of the following designs; option A is preferred for this portfolio pr
 - `flink-job/src/main/java/com/realrisk/flink/MerchantBurstProcessFunction.java`
 - `flink-job/src/main/java/com/realrisk/flink/RuleSet.java`
 
+### Implementation status
+
+Completed on 2026-09-11. At submission the job captures the single rule partition's end offset and
+preserves Kafka offsets in a rule-update envelope. Fresh operators buffer raw events in bounded
+keyed state until that offset has been consumed, then mark broadcast readiness and flush the buffer.
+Overflow fails the operator rather than scoring with incomplete rules. Valid checkpoint restores
+skip a redundant bootstrap because rule state and source positions restore consistently. The
+`realrisk.rule_bootstrap_ready` gauge exposes the gate state. Flink unit
+tests and the shaded package build pass; a live Kubernetes rollout/E2E was not performed in this
+implementation session.
+
 ## P1 — CI must execute all core rule-engine tests
 
 ### Current behavior
@@ -166,6 +187,11 @@ The CI `test` job verifies the root module and `alert-service`, but it does not 
 ### Primary file
 
 - `.github/workflows/ci.yaml`
+
+### Implementation status
+
+Completed on 2026-09-11. The CI test job now runs `flink-job` verification before image builds, and
+the deploy job injects and waits for the dedicated relay image rollout.
 
 ## P2 — Make Docker-dependent test behavior predictable
 

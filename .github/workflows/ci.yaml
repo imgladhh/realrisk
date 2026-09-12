@@ -40,6 +40,9 @@ jobs:
       - name: Verify alert-service module
         run: mvn -B -f ./alert-service/pom.xml verify
 
+      - name: Verify Flink job module
+        run: mvn -B -f ./flink-job/pom.xml verify
+
   build-and-push:
     runs-on: ubuntu-latest
     needs: test
@@ -135,6 +138,7 @@ jobs:
       - name: Inject SHA-tagged images into overlay
         run: |
           sed -i "s#image: realrisk-api:.*#image: $API_IMAGE:$SHORT_SHA#" "$DEPLOY_OVERLAY/api-gateway-deployment-patch.yaml"
+          sed -i "s#image: realrisk-api:.*#image: $API_IMAGE:$SHORT_SHA#" "$DEPLOY_OVERLAY/rule-outbox-relay-deployment-patch.yaml"
           sed -i "s#image: realrisk-alert-service:.*#image: $ALERT_IMAGE:$SHORT_SHA#" "$DEPLOY_OVERLAY/alert-service-deployment-patch.yaml"
           sed -i "s#image: realrisk-flink:.*#image: $FLINK_IMAGE:$SHORT_SHA#" "$DEPLOY_OVERLAY/flink-deployment-patch.yaml"
 
@@ -144,5 +148,6 @@ jobs:
       - name: Wait for rollouts
         run: |
           kubectl rollout status deployment/realrisk-api-gateway -n realrisk --timeout=300s
+          kubectl rollout status deployment/realrisk-rule-outbox-relay -n realrisk --timeout=300s
           kubectl rollout status deployment/realrisk-alert-service -n realrisk --timeout=300s
           kubectl wait --for=condition=Ready flinkdeployment/realrisk-flink -n realrisk --timeout=300s

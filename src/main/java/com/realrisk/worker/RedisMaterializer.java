@@ -7,10 +7,15 @@ import com.realrisk.redis.BlacklistService;
 import java.sql.Timestamp;
 import java.time.Instant;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 @Component
+@ConditionalOnProperty(
+    name = "realrisk.application.workers-enabled",
+    havingValue = "true",
+    matchIfMissing = true)
 public class RedisMaterializer {
   private static final int ASYNC_BLOCK_SEVERITY = 3;
   private static final long ASYNC_BLOCK_TTL_SECONDS = 86_400;

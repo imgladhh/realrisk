@@ -1,5 +1,6 @@
 resources:
   - api-gateway
+  - rule-outbox-relay
   - alert-service
   - kafka
   - flink

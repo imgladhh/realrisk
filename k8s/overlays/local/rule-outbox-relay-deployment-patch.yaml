@@ -1,0 +1,10 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: realrisk-rule-outbox-relay
+spec:
+  template:
+    spec:
+      containers:
+        - name: rule-outbox-relay
+          image: realrisk-api:phase5
