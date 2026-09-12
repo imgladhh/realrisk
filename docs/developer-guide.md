@@ -109,6 +109,12 @@ For the persisted path, use the admin API:
 
 ## Redis Profile Enrichment
 
+The Flink reader uses an explicit availability-first policy. If Redis initialization or a profile
+lookup fails, scoring continues with `blacklisted=false` and `velocity7d=0`. This keeps Kafka/Flink
+processing live, but may produce a false negative by omitting blacklist or velocity risk signals.
+The `realrisk.redis_profile_fallback` Flink counter increments once for every event evaluated with
+this fallback and should be alerted on if the system is operated beyond a demo environment.
+
 Flink reads:
 
 - `blacklist:<userId>`
@@ -122,6 +128,25 @@ docker exec realrisk-redis redis-cli SET velocity:count:7d:user-phase3 125
 docker exec realrisk-redis redis-cli DEL blacklist:user-phase3
 docker exec realrisk-redis redis-cli DEL velocity:count:7d:user-phase3
 ```
+
+## Docker-backed Tests
+
+Run the default root suite normally:
+
+```powershell
+mvn verify
+```
+
+If `realrisk.test.redis.host` is not set, the Redis service tests start `redis:7-alpine` with
+Testcontainers. When Docker is unavailable locally, those integration classes abort as skipped and
+the remaining unit suite continues. To use an existing Redis instead:
+
+```powershell
+mvn -Drealrisk.test.redis.host=localhost -Drealrisk.test.redis.port=6379 verify
+```
+
+CI runs with `-Drealrisk.test.require-docker=true`; Docker unavailability is therefore a build
+failure rather than a skip, preserving Redis integration coverage.
 
 ## Alert Validation
 

@@ -1,8 +1,10 @@
 package com.realrisk.redis;
 
+import org.opentest4j.TestAbortedException;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.utility.DockerImageName;
 
 final class RedisTestSupport {
@@ -15,6 +17,14 @@ final class RedisTestSupport {
     int port = Integer.getInteger("realrisk.test.redis.port", 6379);
 
     if (host == null || host.isBlank()) {
+      if (!DockerClientFactory.instance().isDockerAvailable()) {
+        String message =
+            "Redis integration tests require Docker or realrisk.test.redis.host";
+        if (Boolean.getBoolean("realrisk.test.require-docker")) {
+          throw new IllegalStateException(message);
+        }
+        throw new TestAbortedException(message);
+      }
       redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379);
       redis.start();
       host = redis.getHost();

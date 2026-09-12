@@ -220,6 +220,14 @@ CI must continue to run these tests where Docker is available.
 - `src/test/java/com/realrisk/redis/RateLimitServiceTest.java`
 - `pom.xml`
 
+### Implementation status
+
+Completed on 2026-09-12. Without an explicitly configured test Redis, the shared Redis test support
+checks Docker availability before starting Testcontainers. Local runs abort the two Redis-backed
+test classes when Docker is unavailable, while CI sets `realrisk.test.require-docker=true` so the
+same condition fails the build instead of silently dropping integration coverage. A developer may
+also provide `realrisk.test.redis.host` and `realrisk.test.redis.port`.
+
 ## P2 — State the Redis enrichment failure policy truthfully
 
 ### Current behavior
@@ -243,6 +251,14 @@ When Redis cannot be read, `RedisUserProfileReader` returns `UserProfile.empty()
 - `flink-job/src/test/java/com/realrisk/flink/RedisUserProfileReaderTest.java`
 - `README.md`
 - `docs/developer-guide.md`
+
+### Implementation status
+
+Completed on 2026-09-12. The availability-first behavior remains unchanged: connection and lookup
+failures return `UserProfile.empty()`, which can omit blacklist and velocity signals and cause false
+negatives. `realrisk.redis_profile_fallback` now counts every fallback. Unit tests cover both a
+missing connection and a Redis command exception and verify that the counter callback is invoked.
+README and developer documentation state the tradeoff explicitly.
 
 ## Suggested implementation sequence
 

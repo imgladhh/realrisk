@@ -82,6 +82,10 @@ broadcast state is incomplete. Valid checkpoint restores reuse the checkpointed 
 source offsets. The Flink metric `realrisk.rule_bootstrap_ready` reports `0` while bootstrapping and
 `1` when evaluation is enabled.
 
+Redis profile enrichment deliberately favors pipeline availability: when Redis is unavailable,
+Flink continues with an empty profile. This can omit blacklist and velocity signals and therefore
+create false negatives. Each fallback increments `realrisk.redis_profile_fallback`.
+
 ### Alerts
 
 `alert-service` consumes `alert-events`, stores deduplicated alert rows in `alert_log`, and sends notifications to:
@@ -116,6 +120,10 @@ The system has been validated through:
 - email delivery via Mailtrap
 
 See [memory.md](memory.md) for the full validated history and known operational gotchas.
+
+The default root `mvn verify` skips Redis-backed integration classes when neither Docker nor an
+external test Redis is available. CI requires Docker with `realrisk.test.require-docker=true`, so
+that coverage cannot silently disappear from pull requests.
 
 ## Detailed Docs
 

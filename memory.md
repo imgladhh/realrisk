@@ -2,7 +2,7 @@
 
 > Living context for AI-assisted development sessions.
 > Update `Done`, `In Progress`, `Next`, and `Known Issues` at the end of each session.
-> Last updated: 2026-09-11 (correctness remediation P1 completed)
+> Last updated: 2026-09-12 (correctness remediation P0-P2 completed)
 
 ---
 
@@ -330,6 +330,20 @@ Full topology: `docs/architecture-diagram.md`
     - root offline package build: passed ✅
     - local and production Kustomize rendering: passed ✅
     - live Kubernetes rollout/E2E was not performed in this session
+- Correctness remediation P2 (2026-09-12)
+  - Docker-backed root tests now have an explicit two-mode policy
+    - local `mvn verify` aborts Redis integration classes when Docker is unavailable
+    - an external Redis can be selected with `realrisk.test.redis.host` and `.port`
+    - CI sets `realrisk.test.require-docker=true`, turning missing Docker into a build failure so
+      integration coverage cannot silently disappear
+  - Flink Redis enrichment remains deliberately availability-first
+    - missing connections and Redis command failures return `UserProfile.empty()`
+    - this may omit blacklist/velocity signals and create false negatives
+    - `realrisk.redis_profile_fallback` counts every degraded evaluation
+  - validation:
+    - root offline `verify`: build passed; 23 tests passed and the existing
+      `RedisMaterializerTest` was skipped; Docker-backed Redis classes aborted cleanly ✅
+    - Flink `verify`: 26 tests passed and shaded package built ✅
 - Tooling / docs
   - `scripts/run-api.ps1`
   - `scripts/send-rule-update.ps1`
@@ -339,13 +353,13 @@ Full topology: `docs/architecture-diagram.md`
 
 ### In Progress
 
-Correctness remediation is in progress. P0 and P1 are complete; P2 remains.
+Correctness remediation P0-P2 is complete. No remediation item is currently in progress.
 
 ### Next
 
-1. Make Docker-dependent root tests skip predictably when Docker is unavailable while retaining CI
-   integration coverage.
-2. Document and test the deliberate Redis enrichment availability-first degradation policy.
+1. Optionally add a Flink operator-harness test for the complete bootstrap buffer → ready → flush
+   path recorded under Known Issues.
+2. Run a fresh Kubernetes rollout/E2E when deployment validation is next required.
 
 ---
 

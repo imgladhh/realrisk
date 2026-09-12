@@ -85,17 +85,19 @@ public class MerchantBurstProcessFunction
         .getMetricGroup()
         .addGroup("realrisk")
         .gauge("rule_bootstrap_ready", ruleBootstrapReadyGauge::get);
+    decisionMetrics = new DecisionMetrics(getRuntimeContext().getMetricGroup());
 
     try {
       redisClient = RedisClient.create(buildRedisUri());
       redisConnection = redisClient.connect();
-      userProfileReader = new RedisUserProfileReader(redisConnection.sync());
+      userProfileReader =
+          new RedisUserProfileReader(
+              redisConnection.sync(), decisionMetrics::recordRedisProfileFallback);
     } catch (RuntimeException e) {
-      userProfileReader = new RedisUserProfileReader(null);
+      userProfileReader =
+          new RedisUserProfileReader(null, decisionMetrics::recordRedisProfileFallback);
       closeRedisResources();
     }
-
-    decisionMetrics = new DecisionMetrics(getRuntimeContext().getMetricGroup());
   }
 
   @Override

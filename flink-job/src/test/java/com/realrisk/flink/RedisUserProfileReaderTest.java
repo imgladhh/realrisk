@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.lettuce.core.api.sync.RedisCommands;
 import java.lang.reflect.Proxy;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class RedisUserProfileReaderTest {
@@ -42,9 +43,23 @@ class RedisUserProfileReaderTest {
                   throw new RuntimeException("redis unavailable");
                 });
 
-    UserProfile profile = new RedisUserProfileReader(failingCommands).read("user-3");
+    AtomicInteger fallbackCount = new AtomicInteger();
+    UserProfile profile =
+        new RedisUserProfileReader(failingCommands, fallbackCount::incrementAndGet).read("user-3");
 
     assertThat(profile).isEqualTo(UserProfile.empty());
+    assertThat(fallbackCount).hasValue(1);
+  }
+
+  @Test
+  void missingConnectionDegradesToEmptyProfileAndRecordsFallback() {
+    AtomicInteger fallbackCount = new AtomicInteger();
+
+    UserProfile profile =
+        new RedisUserProfileReader(null, fallbackCount::incrementAndGet).read("user-4");
+
+    assertThat(profile).isEqualTo(UserProfile.empty());
+    assertThat(fallbackCount).hasValue(1);
   }
 
   @SuppressWarnings("unchecked")

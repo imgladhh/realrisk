@@ -35,7 +35,7 @@ jobs:
           cache: maven
 
       - name: Verify root module
-        run: mvn -B verify
+        run: mvn -B -Drealrisk.test.require-docker=true verify
 
       - name: Verify alert-service module
         run: mvn -B -f ./alert-service/pom.xml verify
