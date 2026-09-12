@@ -2,7 +2,7 @@
 
 > Living context for AI-assisted development sessions.
 > Update `Done`, `In Progress`, `Next`, and `Known Issues` at the end of each session.
-> Last updated: 2026-05-23 (Phase 11 notification validation completed with Mailtrap)
+> Last updated: 2026-09-11 (correctness remediation P0 completed)
 
 ---
 
@@ -295,6 +295,19 @@ Full topology: `docs/architecture-diagram.md`
         - `EMAIL alertId=626d2c85-bfe7-3826-beb1-f9a16719bca2 userId=user-phase11-notify-4 severity=CRITICAL ...`
       - conclusion: email delivery code path is validated end-to-end with Mailtrap ✅
     - `alert_log` rows for all three users are present with `status=PROCESSED` ✅
+- Correctness remediation P0 (2026-09-11)
+  - `POST /events` now returns `202` only after Kafka acknowledges the `raw-events` write
+  - failed, timed-out, interrupted, and immediate send failures map to `503 kafka_publish_failed`
+  - failed publishes are not counted as `ALLOW` ingress outcomes
+  - producer policy is explicit: `acks=all`, idempotence enabled, bounded Kafka delivery/request
+    timeouts, and an application wait longer than the Kafka delivery timeout
+  - existing metrics retained: `risk.kafka.publish` and `risk.kafka.publish.errors`
+  - validation:
+    - publisher/controller tests: 6 passed ✅
+    - all selected non-Docker root tests: 21 passed ✅
+    - root application package build: passed ✅
+  - full local root suite remains gated by the existing Docker-unavailable Redis Testcontainers
+    issue tracked as P2 in `docs/reliability-remediation-spec.md`
 - Tooling / docs
   - `scripts/run-api.ps1`
   - `scripts/send-rule-update.ps1`
@@ -304,18 +317,15 @@ Full topology: `docs/architecture-diagram.md`
 
 ### In Progress
 
-_Nothing. Phase 11 core hardening complete; Gmail-specific SMTP validation remains optional ops follow-up._
+Correctness remediation is in progress. P0 is complete; P1 outbox relay ownership is next.
 
 ### Next
 
-1. Optional Gmail follow-up
-   - verify Gmail SMTP auth outside RealRisk if Gmail must be supported directly in local/dev validation
-   - otherwise keep Mailtrap as the preferred test SMTP target
-2. Phase 11 closeout
-   - decide whether to keep `ADMIN_API_KEY=dev-only-insecure` as local default or move to install-time-only override
-   - consider whether `channels_notified` should represent attempted channels or only successful deliveries
-3. Phase 12 (to be specced)
-   - candidates: rate-limit visibility API, Flink savepoint automation, prod overlay hardening, alert-service autoscaling strategy
+1. Implement P1 outbox ownership from `docs/reliability-remediation-spec.md`
+   - dedicated single-active relay is the preferred portfolio-project design
+   - preserve the single-partition, `ruleId` key, ascending-outbox-id ordering contract
+2. Implement the P1 Flink rule-bootstrap readiness gate
+3. Add Flink verification to CI, then address the two P2 test/documentation items
 
 ---
 

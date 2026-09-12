@@ -1,5 +1,6 @@
 package com.realrisk.api;
 
+import com.realrisk.kafka.KafkaPublishException;
 import com.realrisk.kafka.RiskEventPublisher;
 import com.realrisk.metrics.ApiGatewayMetrics;
 import com.realrisk.model.IngestRequest;
@@ -99,6 +100,15 @@ public class IngestController {
           e);
       return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
           .body(new IngestResponse(eventId, requestId, "BLOCKED", "redis_unavailable", 0));
+    } catch (KafkaPublishException e) {
+      log.error(
+          "Kafka publish failed for eventId={}, userId={}, requestId={}",
+          eventId,
+          request.userId(),
+          requestId,
+          e);
+      return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+          .body(new IngestResponse(eventId, requestId, "UNAVAILABLE", "kafka_publish_failed", 0));
     }
   }
 

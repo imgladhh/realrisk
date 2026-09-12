@@ -23,6 +23,19 @@ Check local Schema Registry connectivity:
 Invoke-RestMethod http://localhost:8081/subjects
 ```
 
+## Ingest Acceptance Semantics
+
+`POST /events` returns `202 Accepted` only after Kafka acknowledges the `raw-events` write. The
+producer uses `acks=all`, Kafka idempotence, and a bounded delivery timeout. A serialization,
+broker, or delivery-timeout failure returns `503 Service Unavailable` with
+`reason=kafka_publish_failed`; it is not counted as an allowed ingest.
+
+The application wait defaults to 6000 ms and is configurable with
+`KAFKA_PUBLISH_TIMEOUT_MS`. It is intentionally longer than Kafka's 5000 ms delivery timeout so
+the producer normally completes the future with a definitive success or failure first. Publish
+latency continues to use `risk.kafka.publish`, and failures increment
+`risk.kafka.publish.errors`.
+
 ## Flink Job
 
 Build and test:

@@ -63,7 +63,7 @@ kubectl apply -k .\k8s\overlays\local
 `POST /events` enters the fast path:
 
 1. Redis blacklist and per-user rate limit
-2. Avro publish to `raw-events`
+2. broker-acknowledged Avro publish to `raw-events` (`503` on publish failure or timeout)
 3. Flink consumes and emits:
    - `decision-audit`
    - `high-risk-events`
@@ -114,4 +114,3 @@ The README keeps the main path only. Detailed runbooks and examples live here:
 
 - [docs/developer-guide.md](docs/developer-guide.md) - local run, Flink run, rules, alerts, and K8s workflow details
 - [memory.md](memory.md) - phase-by-phase validation evidence
-
